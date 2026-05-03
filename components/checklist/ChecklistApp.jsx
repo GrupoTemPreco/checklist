@@ -62,15 +62,6 @@ function perguntasVisiveisNaSecao(secao, respostas) {
   }) ?? [];
 }
 
-const HISTORICO_MOCK = [
-  { id: "av1", avaliador_nome: "Ana Costa", unidade: "Unidade Centro", turno: "manha", percentual: 87.3, nota_total: 1168, nota_maxima: 1340, criado_em: "2026-04-28T08:30:00Z", status: "concluida",
-    por_secao: [{ titulo: "Visão de Consumidor", percentual: 92 }, { titulo: "Layout e Precificação", percentual: 84 }, { titulo: "Vendas e Atendimento", percentual: 88 }, { titulo: "Financeiro", percentual: 100 }, { titulo: "Processos Gerenciais", percentual: 73 }] },
-  { id: "av2", avaliador_nome: "Carlos Lima", unidade: "Unidade Norte", turno: "tarde", percentual: 71.5, nota_total: 958, nota_maxima: 1340, criado_em: "2026-04-25T14:10:00Z", status: "concluida",
-    por_secao: [{ titulo: "Visão de Consumidor", percentual: 68 }, { titulo: "Layout e Precificação", percentual: 72 }, { titulo: "Vendas e Atendimento", percentual: 74 }, { titulo: "Financeiro", percentual: 100 }, { titulo: "Processos Gerenciais", percentual: 60 }] },
-  { id: "av3", avaliador_nome: "Fernanda Rocha", unidade: "Unidade Centro", turno: "manha", percentual: 94.1, nota_total: 1261, nota_maxima: 1340, criado_em: "2026-04-22T09:00:00Z", status: "concluida",
-    por_secao: [{ titulo: "Visão de Consumidor", percentual: 96 }, { titulo: "Layout e Precificação", percentual: 95 }, { titulo: "Vendas e Atendimento", percentual: 93 }, { titulo: "Financeiro", percentual: 100 }, { titulo: "Processos Gerenciais", percentual: 87 }] },
-];
-
 // ─── UTILITÁRIOS ────────────────────────────────────────────────────────────
 function getScoreColor(pct) {
   if (pct >= 85) return "#16a34a";
@@ -598,100 +589,426 @@ function ChecklistView({ userPerfil }) {
   );
 }
 
+function sortAvaliacoesDesc(list) {
+  return [...list].sort((a, b) => {
+    const ta = new Date(a.checkout_em || a.criado_em || 0).getTime();
+    const tb = new Date(b.checkout_em || b.criado_em || 0).getTime();
+    return tb - ta;
+  });
+}
+
+function montarPorSecao(secoes, respostas) {
+  const soma = new Map();
+  for (const s of secoes) soma.set(s.id, 0);
+  for (const r of respostas || []) {
+    if (!r.secao_id || !soma.has(r.secao_id)) continue;
+    soma.set(r.secao_id, (soma.get(r.secao_id) || 0) + (r.pontos_obtidos || 0));
+  }
+  return secoes.map((s) => {
+    const obt = soma.get(s.id) || 0;
+    const max = s.pontos_max || 0;
+    const percentual = max > 0 ? Math.min(100, Math.round((obt / max) * 100)) : 0;
+    return { secao_id: s.id, titulo: s.titulo, percentual };
+  });
+}
+
 // ─── VIEW: DASHBOARD ─────────────────────────────────────────────────────────
-function DashboardView() {
+function DashboardView({ userPerfil = "gerente" }) {
+  const [tipoDashboard, setTipoDashboard] = useState(
+    userPerfil === "supervisor" ? "supervisor" : "gerente"
+  );
   const [filtro, setFiltro] = useState("todas");
   const [detalhe, setDetalhe] = useState(null);
+  const [secoes, setSecoes] = useState([]);
+  const [avaliacoes, setAvaliacoes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const unidades = [...new Set(HISTORICO_MOCK.map(a => a.unidade))];
-  const avaliacoesFiltradas = filtro === "todas" ? HISTORICO_MOCK : HISTORICO_MOCK.filter(a => a.unidade === filtro);
-  const mediaGeral = avaliacoesFiltradas.length > 0
-    ? Math.round(avaliacoesFiltradas.reduce((a, v) => a + v.percentual, 0) / avaliacoesFiltradas.length)
-    : 0;
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const qs = new URLSearchParams({ tipo_avaliador: tipoDashboard });
+        const res = await fetch(`/api/checklist/avaliacoes?${qs}`);
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || "Falha ao carregar avaliações.");
+        if (cancel) return;
+        const rows = json.avaliacoes ?? [];
+        const sec = json.secoes ?? [];
+        setAvaliacoes(rows);
+        setSecoes(sec);
+        const unis = [...new Set(rows.map((a) => a.unidade))];
+        setFiltro((f) => (f !== "todas" && !unis.includes(f) ? "todas" : f));
+        setDetalhe((d) => (d && !rows.some((a) => a.id === d.id) ? null : d));
+      } catch (e) {
+        if (!cancel) setError(e.message ?? "Erro ao carregar.");
+      } finally {
+        if (!cancel) setLoading(false);
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [tipoDashboard]);
 
-  if (detalhe) {
-    const av = detalhe;
-    return (
-      <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px" }}>
-        <button type="button" onClick={() => setDetalhe(null)} style={{ background: "none", border: "none", color: "var(--accent)", fontSize: 14, fontWeight: 600, cursor: "pointer", marginBottom: 16, padding: 0 }}>
-          ← Voltar
-        </button>
-        <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div>
-              <h2 style={{ margin: "0 0 4px", fontSize: 18, color: "var(--text-primary)" }}>{av.unidade}</h2>
-              <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>{av.avaliador_nome} · {formatDate(av.criado_em)}</p>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 28, fontWeight: 800, color: getScoreColor(av.percentual) }}>{av.percentual}%</div>
-              <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{av.nota_total}/{av.nota_maxima} pts</div>
-            </div>
-          </div>
-        </div>
+  const unidades = [...new Set(avaliacoes.map((a) => a.unidade))].sort();
+  const avaliacoesFiltradas = sortAvaliacoesDesc(
+    filtro === "todas" ? avaliacoes : avaliacoes.filter((a) => a.unidade === filtro)
+  );
+  const mediaGeral =
+    avaliacoesFiltradas.length > 0
+      ? Math.round(
+          avaliacoesFiltradas.reduce((a, v) => a + Number(v.percentual || 0), 0) /
+            avaliacoesFiltradas.length
+        )
+      : 0;
 
-        <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 14, padding: 20 }}>
-          <h3 style={{ margin: "0 0 16px", fontSize: 15, color: "var(--text-primary)" }}>Resultado por seção</h3>
-          {av.por_secao.map((s, i) => (
-            <div key={i} style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 14, color: "var(--text-primary)", fontWeight: 500 }}>{s.titulo}</span>
-                <span style={{ fontSize: 14, fontWeight: 700, color: getScoreColor(s.percentual) }}>{s.percentual}%</span>
-              </div>
-              <ProgressBar value={s.percentual} max={100} color={getScoreColor(s.percentual)} />
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+  const sel =
+    detalhe?.id != null ? avaliacoesFiltradas.find((a) => a.id === detalhe.id) : null;
+  const displayAv = sel ?? avaliacoesFiltradas[0] ?? null;
+  const porSecaoDisplay = displayAv ? montarPorSecao(secoes, displayAv.respostas) : [];
+
+  let deltaVsAnterior = null;
+  if (filtro !== "todas" && avaliacoesFiltradas.length >= 2) {
+    const [atual, anterior] = avaliacoesFiltradas;
+    deltaVsAnterior = Number(atual.percentual || 0) - Number(anterior.percentual || 0);
   }
+
+  const numUnidadesKpi =
+    filtro === "todas" ? unidades.length : avaliacoesFiltradas.length > 0 ? 1 : 0;
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px" }}>
-      {/* KPIs */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         {[
-          { label: "Média geral", value: `${mediaGeral}%`, color: getScoreColor(mediaGeral) },
-          { label: "Avaliações", value: avaliacoesFiltradas.length },
-          { label: "Unidades", value: unidades.length },
-        ].map((k, i) => (
-          <div key={i} style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 12px", textAlign: "center" }}>
-            <div style={{ fontSize: 22, fontWeight: 800, color: k.color || "var(--text-primary)" }}>{k.value}</div>
-            <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>{k.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Filtro */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4 }}>
-        {["todas", ...unidades].map(u => (
-          <button type="button" key={u} onClick={() => setFiltro(u)}
-            style={{ whiteSpace: "nowrap", padding: "7px 14px", borderRadius: 20, border: "1.5px solid", fontSize: 13, fontWeight: 500, cursor: "pointer",
-              borderColor: filtro === u ? "var(--accent)" : "var(--border)",
-              background: filtro === u ? "var(--accent)" : "transparent",
-              color: filtro === u ? "#fff" : "var(--text-secondary)" }}>
-            {u === "todas" ? "Todas as unidades" : u}
+          { val: "gerente", label: "Gerentes" },
+          { val: "supervisor", label: "Supervisores" },
+        ].map(({ val, label }) => (
+          <button
+            key={val}
+            type="button"
+            onClick={() => setTipoDashboard(val)}
+            style={{
+              flex: 1,
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1.5px solid",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              borderColor: tipoDashboard === val ? "var(--accent)" : "var(--border)",
+              background: tipoDashboard === val ? "var(--accent)" : "transparent",
+              color: tipoDashboard === val ? "#fff" : "var(--text-secondary)",
+            }}
+          >
+            {label}
           </button>
         ))}
       </div>
 
-      {/* Lista */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {avaliacoesFiltradas.map(av => (
-          <button type="button" key={av.id} onClick={() => setDetalhe(av)}
-            style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 14, padding: "16px", cursor: "pointer", textAlign: "left", width: "100%" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2 }}>{av.unidade}</div>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{av.avaliador_nome} · {formatDate(av.criado_em)}</div>
+      {loading && (
+        <p style={{ margin: "0 0 16px", fontSize: 14, color: "var(--text-secondary)" }}>
+          A carregar…
+        </p>
+      )}
+      {error && (
+        <p style={{ margin: "0 0 16px", fontSize: 14, color: "#b91c1c" }}>{error}</p>
+      )}
+
+      {!loading && !error && avaliacoes.length === 0 && (
+        <p style={{ margin: "0 0 16px", fontSize: 14, color: "var(--text-secondary)" }}>
+          Nenhuma avaliação concluída para este filtro.
+        </p>
+      )}
+
+      {!loading && !error && avaliacoes.length > 0 && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
+            {[
+              { label: "Média geral", value: `${mediaGeral}%`, color: getScoreColor(mediaGeral) },
+              { label: "Avaliações", value: avaliacoesFiltradas.length },
+              { label: "Unidades", value: numUnidadesKpi },
+            ].map((k, i) => (
+              <div
+                key={i}
+                style={{
+                  background: "var(--card-bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 12,
+                  padding: "14px 12px",
+                  textAlign: "center",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 800,
+                    color: k.color || "var(--text-primary)",
+                  }}
+                >
+                  {k.value}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                  {k.label}
+                </div>
               </div>
-              <div style={{ background: getScoreBg(av.percentual), border: `1.5px solid ${getScoreColor(av.percentual)}`, borderRadius: 8, padding: "6px 12px" }}>
-                <span style={{ fontSize: 18, fontWeight: 800, color: getScoreColor(av.percentual) }}>{av.percentual}%</span>
+            ))}
+          </div>
+
+          {filtro !== "todas" && deltaVsAnterior != null && (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: "10px 12px",
+                borderRadius: 10,
+                background: deltaVsAnterior >= 0 ? "#f0fdf4" : "#fef2f2",
+                border: `1px solid ${deltaVsAnterior >= 0 ? "#86efac" : "#fecaca"}`,
+                fontSize: 13,
+                color: "var(--text-primary)",
+              }}
+            >
+              <strong>Vs. avaliação anterior</strong> (mesma unidade):{" "}
+              <span
+                style={{
+                  fontWeight: 700,
+                  color: deltaVsAnterior >= 0 ? "#15803d" : "#b91c1c",
+                }}
+              >
+                {deltaVsAnterior >= 0 ? "+" : ""}
+                {deltaVsAnterior.toFixed(1)} p.p. no percentual global
+              </span>
+            </div>
+          )}
+
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              marginBottom: 16,
+              overflowX: "auto",
+              paddingBottom: 4,
+            }}
+          >
+            {["todas", ...unidades].map((u) => (
+              <button
+                type="button"
+                key={u}
+                onClick={() => {
+                  setFiltro(u);
+                  setDetalhe(null);
+                }}
+                style={{
+                  whiteSpace: "nowrap",
+                  padding: "7px 14px",
+                  borderRadius: 20,
+                  border: "1.5px solid",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  borderColor: filtro === u ? "var(--accent)" : "var(--border)",
+                  background: filtro === u ? "var(--accent)" : "transparent",
+                  color: filtro === u ? "#fff" : "var(--text-secondary)",
+                }}
+              >
+                {u === "todas" ? "Todas as unidades" : u}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+            {avaliacoesFiltradas.map((av) => {
+              const ativo = displayAv?.id === av.id;
+              return (
+                <button
+                  type="button"
+                  key={av.id}
+                  onClick={() => setDetalhe(av)}
+                  style={{
+                    background: ativo ? "var(--accent-soft)" : "var(--card-bg)",
+                    border: `1.5px solid ${ativo ? "var(--accent)" : "var(--border)"}`,
+                    borderRadius: 14,
+                    padding: "16px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    width: "100%",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      marginBottom: 10,
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 15,
+                          fontWeight: 700,
+                          color: "var(--text-primary)",
+                          marginBottom: 2,
+                        }}
+                      >
+                        {av.unidade}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                        {av.avaliador_nome} · {formatDate(av.checkout_em || av.criado_em)}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        background: getScoreBg(av.percentual),
+                        border: `1.5px solid ${getScoreColor(av.percentual)}`,
+                        borderRadius: 8,
+                        padding: "6px 12px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 800,
+                          color: getScoreColor(av.percentual),
+                        }}
+                      >
+                        {Math.round(Number(av.percentual || 0))}%
+                      </span>
+                    </div>
+                  </div>
+                  <ProgressBar
+                    value={Number(av.percentual || 0)}
+                    max={100}
+                    color={getScoreColor(av.percentual)}
+                  />
+                </button>
+              );
+            })}
+          </div>
+
+          {displayAv && (
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 12,
+                }}
+              >
+                <h2 style={{ margin: 0, fontSize: 16, color: "var(--text-primary)" }}>
+                  Detalhe {detalhe ? "" : "(última concluída)"}
+                </h2>
+                {detalhe && (
+                  <button
+                    type="button"
+                    onClick={() => setDetalhe(null)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "var(--accent)",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    Ver última
+                  </button>
+                )}
+              </div>
+              <div
+                style={{
+                  background: "var(--card-bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 14,
+                  padding: 20,
+                  marginBottom: 16,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                  }}
+                >
+                  <div>
+                    <h3 style={{ margin: "0 0 4px", fontSize: 18, color: "var(--text-primary)" }}>
+                      {displayAv.unidade}
+                    </h3>
+                    <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
+                      {displayAv.avaliador_nome} ·{" "}
+                      {formatDate(displayAv.checkout_em || displayAv.criado_em)}
+                    </p>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div
+                      style={{
+                        fontSize: 28,
+                        fontWeight: 800,
+                        color: getScoreColor(displayAv.percentual),
+                      }}
+                    >
+                      {Math.round(Number(displayAv.percentual || 0))}%
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                      {displayAv.nota_total != null && displayAv.nota_maxima != null
+                        ? `${displayAv.nota_total}/${displayAv.nota_maxima} pts`
+                        : "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: "var(--card-bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 14,
+                  padding: 20,
+                }}
+              >
+                <h3 style={{ margin: "0 0 16px", fontSize: 15, color: "var(--text-primary)" }}>
+                  Resultado por seção
+                </h3>
+                {porSecaoDisplay.map((s) => (
+                  <div key={s.secao_id} style={{ marginBottom: 16 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        marginBottom: 6,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 14,
+                          color: "var(--text-primary)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {s.titulo}
+                      </span>
+                      <span
+                        style={{ fontSize: 14, fontWeight: 700, color: getScoreColor(s.percentual) }}
+                      >
+                        {s.percentual}%
+                      </span>
+                    </div>
+                    <ProgressBar
+                      value={s.percentual}
+                      max={100}
+                      color={getScoreColor(s.percentual)}
+                    />
+                  </div>
+                ))}
               </div>
             </div>
-            <ProgressBar value={av.percentual} max={100} color={getScoreColor(av.percentual)} />
-          </button>
-        ))}
-      </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -732,7 +1049,11 @@ export default function ChecklistApp({ userPerfil = "supervisor" }) {
         )}
       </div>
 
-      {aba === "checklist" ? <ChecklistView userPerfil={userPerfil} /> : <DashboardView />}
+      {aba === "checklist" ? (
+        <ChecklistView userPerfil={userPerfil} />
+      ) : (
+        <DashboardView userPerfil={userPerfil} />
+      )}
     </div>
   );
 }
