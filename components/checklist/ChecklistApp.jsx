@@ -1,117 +1,66 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { perguntaIdPorCodigo } from "@/lib/perguntaDbIds";
+import { fetchUnidades, fetchSecoes } from "@/lib/supabase";
 
-// ─── DADOS MOCKADOS (substituir por chamadas Supabase) ──────────────────────
-const SECOES_MOCK = [
-  {
-    id: "s1", ordem: 1, titulo: "Visão de Consumidor", pontos_max: 160,
-    perguntas: [
-      { id: "p1_1", codigo: "1.1", texto: "Qual a sensação ao entrar na loja? A loja está atrativa? Sente prazer em comprar?", tipo: "texto_livre", pontos_max: 0, obrigatoria: false, permite_foto: true },
-      { id: "p1_2", codigo: "1.2", texto: "Temperatura da loja, está adequada?", tipo: "sim_nao", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0 }, { label: "Sim", valor: "sim", pontos: 10 }] },
-      { id: "p1_2_1", codigo: "1.2.1", texto: "Já foi solicitado à supervisão a troca de equipamentos ou manutenção para melhorar a temperatura?", tipo: "condicional", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0, plano_acao: true }, { label: "Sim", valor: "sim", pontos: 10 }],
-        pergunta_pai_id: "p1_2", resposta_pai_gatilho: "nao" },
-      { id: "p1_3", codigo: "1.3", texto: "As cortinas de ar estão ligadas?", tipo: "sim_nao", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0 }, { label: "Sim", valor: "sim", pontos: 10 }] },
-      { id: "p1_4", codigo: "1.4", texto: "A loja está bem iluminada?", tipo: "escala_3", pontos_max: 20, obrigatoria: true, permite_foto: true,
-        opcoes: [{ label: "Ruim", valor: "ruim", pontos: 0, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 10, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 20 }] },
-      { id: "p1_5", codigo: "1.5", texto: "Os funcionários possuem crachá?", tipo: "sim_nao", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0 }, { label: "Sim", valor: "sim", pontos: 10 }] },
-      { id: "p1_6", codigo: "1.6", texto: "Os colaboradores demonstram uma boa postura?", tipo: "sim_nao", pontos_max: 20, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não conforme", valor: "nao", pontos: 0, plano_acao: true }, { label: "Conforme", valor: "sim", pontos: 20 }] },
-      { id: "p1_7", codigo: "1.7", texto: "Qual o nível dos colaboradores? Os mesmos estão conversando paralelamente entre si ou demonstrando falta de empatia?", tipo: "escala_3", pontos_max: 20, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Ruim", valor: "ruim", pontos: 0, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 10, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 20 }] },
-      { id: "p1_8", codigo: "1.8", texto: "No modo geral, qual a nota em relação à limpeza da loja?", tipo: "nota_livre", pontos_max: 0, obrigatoria: false, permite_foto: true },
-      { id: "p1_9", codigo: "1.9", texto: "No modo geral, de 0 a 10, qual a nota em relação à visão do consumidor?", tipo: "nota_livre", pontos_max: 0, obrigatoria: false, permite_foto: false },
-    ]
-  },
-  {
-    id: "s2", ordem: 2, titulo: "Layout e Precificação", pontos_max: 540,
-    perguntas: [
-      { id: "p2_1", codigo: "2.1", texto: "A loja está sinalizada e com a layoutização das promoções?", tipo: "sim_nao", pontos_max: 30, obrigatoria: true, permite_foto: true,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0, plano_acao: true }, { label: "Sim", valor: "sim", pontos: 30 }] },
-      { id: "p2_2", codigo: "2.2", texto: "As seções de Fraldas estão repostas, organizadas e precificadas?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: true,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p2_3", codigo: "2.3", texto: "As seções de Leites estão repostas, organizadas e precificadas?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: true,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p2_4", codigo: "2.4", texto: "As seções de Dermos estão repostas, organizadas e precificadas?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: true,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30 }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p2_5", codigo: "2.5", texto: "A farmacinha está organizada, com produto e precificada?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: true,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p2_6", codigo: "2.6", texto: "As seções de Conveniência estão repostas, organizadas e precificadas?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p2_7", codigo: "2.7", texto: "As seções dos Freezer e Geladeira estão repostas, organizadas e precificadas?", tipo: "escala_5", pontos_max: 30, obrigatoria: true, permite_foto: true,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 0, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 10, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 20 }, { label: "Ótimo", valor: "otimo", pontos: 30 }] },
-      { id: "p2_8", codigo: "2.8", texto: "Qual o nível de reposição dos itens da perfumaria? Está bem reposta ou aparenta estar \"vazia\"?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: true,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p2_9", codigo: "2.9", texto: "Os cestões de medicamentos/perfumaria estão cheios e precificados?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30 }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p2_10", codigo: "2.10", texto: "A precificação no geral fora do balcão está completa? Se não, apontar qual seção precisa de atenção.", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p2_11", codigo: "2.11", texto: "As pontas de gôndolas estão fazendo sentido com a seção?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30 }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p2_12", codigo: "2.12", texto: "E a limpeza em relação a todos esses pontos?", tipo: "texto_livre", pontos_max: 0, obrigatoria: false, permite_foto: true },
-      { id: "p2_13", codigo: "2.13", texto: "No modo geral, de 0 a 10, qual a nota em relação ao layout e à precificação?", tipo: "nota_livre", pontos_max: 0, obrigatoria: false, permite_foto: false },
-    ]
-  },
-  {
-    id: "s3", ordem: 3, titulo: "Vendas e Atendimento", pontos_max: 390,
-    perguntas: [
-      { id: "p3_1", codigo: "3.1", texto: "A equipe no balcão está realizando a abordagem com o cliente usando o padrão Ultra/Maxi?", tipo: "escala_3", pontos_max: 30, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Ruim", valor: "ruim", pontos: 0, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 20, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 30 }] },
-      { id: "p3_2", codigo: "3.2", texto: "A equipe no caixa está realizando a abordagem com o cliente usando o padrão Ultra/Maxi?", tipo: "escala_3", pontos_max: 30, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Ruim", valor: "ruim", pontos: 0, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 20, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 30 }] },
-      { id: "p3_3", codigo: "3.3", texto: "A equipe está atendendo fora do balcão? (Entregando cestinha, abordagem na perfumaria, na fralda...)", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30 }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p3_4", codigo: "3.4", texto: "A equipe está agregando venda? (Em toda área de loja: balcão, perfumaria...) Apontar qual área precisa de atenção.", tipo: "escala_3", pontos_max: 30, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Ruim", valor: "ruim", pontos: 0, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 20, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 30 }] },
-      { id: "p3_5", codigo: "3.5", texto: "A equipe pede o CPF para cadastro?", tipo: "sim_nao", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0 }, { label: "Sim", valor: "sim", pontos: 10 }] },
-      { id: "p3_6", codigo: "3.6", texto: "Nível de limpeza e conservação dos teclados dos caixas?", tipo: "escala_3", pontos_max: 20, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Ruim", valor: "ruim", pontos: 0 }, { label: "Regular", valor: "regular", pontos: 10 }, { label: "Bom", valor: "bom", pontos: 20 }] },
-      { id: "p3_7", codigo: "3.7", texto: "Nível de limpeza e conservação dos teclados dos balcões?", tipo: "escala_3", pontos_max: 20, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Ruim", valor: "ruim", pontos: 0 }, { label: "Regular", valor: "regular", pontos: 10 }, { label: "Bom", valor: "bom", pontos: 20 }] },
-      { id: "p3_8", codigo: "3.8", texto: "Como você avalia a limpeza e organização do caixa?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: true,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p3_9", codigo: "3.9", texto: "Como você avalia a limpeza e organização do balcão?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: true,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30 }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p3_10", codigo: "3.10", texto: "As gavetas dos balcões estão todas funcionando?", tipo: "sim_nao", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0, plano_acao: true }, { label: "Sim", valor: "sim", pontos: 10 }] },
-      { id: "p3_11", codigo: "3.11", texto: "As gavetas dos caixas estão todas funcionando?", tipo: "sim_nao", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0, plano_acao: true }, { label: "Sim", valor: "sim", pontos: 10 }] },
-      { id: "p3_12", codigo: "3.12", texto: "Os bipadores dos balcões estão todos funcionando?", tipo: "sim_nao", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0, plano_acao: true }, { label: "Sim", valor: "sim", pontos: 10 }] },
-      { id: "p3_13", codigo: "3.13", texto: "Os bipadores dos caixas estão todos funcionando?", tipo: "sim_nao", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0, plano_acao: true }, { label: "Sim", valor: "sim", pontos: 10 }] },
-      { id: "p3_14", codigo: "3.14", texto: "O TEF está funcionando em todos os caixas?", tipo: "sim_nao", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0 }, { label: "Sim", valor: "sim", pontos: 10 }] },
-      { id: "p3_15", codigo: "3.15", texto: "A impressora de cupom fiscal está funcionando em todos os caixas?", tipo: "sim_nao", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0 }, { label: "Sim", valor: "sim", pontos: 10 }] },
-      { id: "p3_16", codigo: "3.16", texto: "As cadeiras dos caixas estão todas funcionando e bem conservadas?", tipo: "sim_nao", pontos_max: 10, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Não", valor: "nao", pontos: 0, plano_acao: true }, { label: "Sim", valor: "sim", pontos: 10 }] },
-      { id: "p3_17", codigo: "3.17", texto: "No modo geral, de 0 a 10, qual a nota em relação às vendas e atendimento?", tipo: "nota_livre", pontos_max: 0, obrigatoria: false, permite_foto: false },
-    ]
-  },
-  {
-    id: "s4", ordem: 4, titulo: "Financeiro", pontos_max: 100,
-    perguntas: [
-      { id: "p4_1", codigo: "4.1", texto: "A contagem do fundo de cofre bateu? (Sobra acima de R$10 ou qualquer falta = Não conforme)", tipo: "sim_nao", pontos_max: 100, obrigatoria: true, permite_foto: true,
-        opcoes: [{ label: "Não conforme", valor: "nao", pontos: 0, plano_acao: true }, { label: "Conforme", valor: "sim", pontos: 100 }] },
-    ]
-  },
-  {
-    id: "s5", ordem: 5, titulo: "Processos Gerenciais", pontos_max: 150,
-    perguntas: [
-      { id: "p5_1", codigo: "5.1", texto: "Como você avalia o grau de conhecimento do gestor nas funções do CAIXA?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p5_2", codigo: "5.2", texto: "Como você avalia o grau de conhecimento do gestor nas funções da ADM?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-      { id: "p5_3", codigo: "5.3", texto: "Como você avalia o grau de conhecimento do gestor nas funções do ESTOQUISTA?", tipo: "escala_5", pontos_max: 50, obrigatoria: true, permite_foto: false,
-        opcoes: [{ label: "Péssimo", valor: "pessimo", pontos: 0, plano_acao: true }, { label: "Ruim", valor: "ruim", pontos: 20, plano_acao: true }, { label: "Regular", valor: "regular", pontos: 30, plano_acao: true }, { label: "Bom", valor: "bom", pontos: 40 }, { label: "Ótimo", valor: "otimo", pontos: 50 }] },
-    ]
-  },
-];
+const UUID_PERGUNTA = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+
+const TEXTO_SUBTURNO = { manha: "Turno da manhã", tarde: "Turno da tarde" };
+
+function normalizarOpcoes(opcoes) {
+  let o = opcoes;
+  if (typeof o === "string") {
+    try {
+      o = JSON.parse(o);
+    } catch {
+      o = [];
+    }
+  }
+  return Array.isArray(o) ? o : [];
+}
+
+function normalizarPerguntaParaUi(p) {
+  return {
+    ...p,
+    opcoes: normalizarOpcoes(p.opcoes),
+    obrigatoria: p.obrigatoria !== false,
+    permite_foto: !!p.permite_foto,
+  };
+}
+
+function normalizarSecoesDaApi(rows) {
+  const lista = rows ?? [];
+  return lista.map((s) => {
+    const perguntasRaw = Array.isArray(s.perguntas) ? s.perguntas : [];
+    const perguntas = perguntasRaw.filter((pr) => pr.ativo !== false).map(normalizarPerguntaParaUi);
+    return { ...s, perguntas };
+  });
+}
+
+function idPerguntaParaGravar(p) {
+  const id = p?.id != null ? String(p.id) : "";
+  if (UUID_PERGUNTA.test(id)) return id;
+  return perguntaIdPorCodigo(p.codigo) || null;
+}
+
+/** Preserva ordem da API (grupo → nome); cada grupo aparece uma vez por ordem de chegada. */
+function agruparUnidadesPorGrupo(lista) {
+  const map = new Map();
+  for (const u of lista) {
+    const k = u.grupo ?? "";
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(u);
+  }
+  return [...map.entries()];
+}
+
+function perguntasVisiveisNaSecao(secao, respostas) {
+  return secao?.perguntas?.filter((p) => {
+    if (p.tipo !== "condicional") return true;
+    const pai = respostas[p.pergunta_pai_id];
+    return pai?.valor === p.resposta_pai_gatilho;
+  }) ?? [];
+}
 
 const HISTORICO_MOCK = [
   { id: "av1", avaliador_nome: "Ana Costa", unidade: "Unidade Centro", turno: "manha", percentual: 87.3, nota_total: 1168, nota_maxima: 1340, criado_em: "2026-04-28T08:30:00Z", status: "concluida",
@@ -261,21 +210,79 @@ function ProgressBar({ value, max, color }) {
   );
 }
 
+async function persistirRespostasDaSecao(avaliacao_id, sec, respostas) {
+  const lista = perguntasVisiveisNaSecao(sec, respostas);
+  const items = [];
+  for (const p of lista) {
+    const r = respostas[p.id];
+    if (!r || r.valor === undefined || r.valor === "") continue;
+    const pergunta_id = idPerguntaParaGravar(p);
+    if (!pergunta_id) continue;
+    const foto_url =
+      r.foto_url && typeof r.foto_url === "string" && !r.foto_url.startsWith("blob:")
+        ? r.foto_url
+        : null;
+    items.push({
+      avaliacao_id,
+      pergunta_id,
+      valor: String(r.valor),
+      pontos_obtidos: r.pontos ?? 0,
+      comentario: r.comentario || null,
+      plano_acao: r.plano_acao || null,
+      foto_url,
+    });
+  }
+  if (items.length === 0) return;
+  const res = await fetch("/api/checklist/respostas", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || "Falha ao guardar respostas.");
+}
+
 // ─── VIEW: CHECKLIST (formulário) ───────────────────────────────────────────
-function ChecklistView({ onSubmit }) {
+function ChecklistView() {
   const [step, setStep] = useState("identificacao"); // identificacao | secao | concluido
   const [secaoAtual, setSecaoAtual] = useState(0);
   const [avaliador, setAvaliador] = useState("");
-  const [unidade, setUnidade] = useState("");
+  const [unidadeNome, setUnidadeNome] = useState("");
+  const [turnoEscolhido, setTurnoEscolhido] = useState("manha");
+  const [listaUnidades, setListaUnidades] = useState([]);
+  const [unidadesLoading, setUnidadesLoading] = useState(true);
+  const [unidadesErro, setUnidadesErro] = useState(null);
+  const [secoesLista, setSecoesLista] = useState([]);
   const [respostas, setRespostas] = useState({});
+  const [avaliacaoId, setAvaliacaoId] = useState(null);
+  const [syncError, setSyncError] = useState(null);
+  const [iniciarLoading, setIniciarLoading] = useState(false);
+  const [navegarLoading, setNavegarLoading] = useState(false);
 
-  const secao = SECOES_MOCK[secaoAtual];
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      setUnidadesErro(null);
+      setUnidadesLoading(true);
+      try {
+        const rows = await fetchUnidades();
+        if (!cancel) setListaUnidades(rows);
+      } catch (e) {
+        if (!cancel) setUnidadesErro(e.message ?? "Erro ao carregar unidades.");
+      } finally {
+        if (!cancel) setUnidadesLoading(false);
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, []);
 
-  const perguntasVisiveis = secao?.perguntas.filter(p => {
-    if (p.tipo !== "condicional") return true;
-    const pai = respostas[p.pergunta_pai_id];
-    return pai?.valor === p.resposta_pai_gatilho;
-  }) || [];
+  const unidadesPorGrupo = agruparUnidadesPorGrupo(listaUnidades);
+
+  const secao = secoesLista[secaoAtual];
+
+  const perguntasVisiveis = secao ? perguntasVisiveisNaSecao(secao, respostas) : [];
 
   const pontosSecao = perguntasVisiveis.reduce((acc, p) => acc + (respostas[p.id]?.pontos || 0), 0);
   const pontosMaxSecao = perguntasVisiveis.reduce((acc, p) => acc + p.pontos_max, 0);
@@ -287,17 +294,18 @@ function ChecklistView({ onSubmit }) {
 
   const handleResposta = (pId, val) => setRespostas(r => ({ ...r, [pId]: val }));
 
-  const totalGeral = SECOES_MOCK.reduce((acc, s) => {
-    return acc + s.perguntas.filter(p => {
+  const totalGeral = secoesLista.reduce((acc, s) => {
+    return acc + (s.perguntas ?? []).filter(p => {
       if (p.tipo !== "condicional") return true;
       return respostas[p.pergunta_pai_id]?.valor === p.resposta_pai_gatilho;
     }).reduce((a, p) => a + (respostas[p.id]?.pontos || 0), 0);
   }, 0);
 
-  const maxGeral = SECOES_MOCK.reduce((acc, s) => acc + s.pontos_max, 0);
+  const maxGeral = secoesLista.reduce((acc, s) => acc + (s.pontos_max ?? 0), 0);
 
   if (step === "identificacao") {
-    const podeIniciar = Boolean(avaliador.trim() && unidade.trim());
+    const podeIniciar =
+      Boolean(avaliador.trim() && unidadeNome.trim()) && !unidadesLoading && listaUnidades.length > 0;
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", padding: "24px 16px" }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
@@ -305,14 +313,44 @@ function ChecklistView({ onSubmit }) {
             <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#fff" strokeWidth="2.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12l2 2 4-4"/></svg>
           </div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>Avaliação de Loja</h1>
-          <p style={{ margin: "4px 0 0", fontSize: 14, color: "var(--text-secondary)" }}>Turno da manhã — Supervisão</p>
+          <p style={{ margin: "4px 0 0", fontSize: 14, color: "var(--text-secondary)" }}>
+            {TEXTO_SUBTURNO[turnoEscolhido]} — Supervisão
+          </p>
         </div>
 
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            if (!avaliador.trim() || !unidade.trim()) return;
-            setStep("secao");
+            if (!avaliador.trim() || !unidadeNome.trim()) return;
+            setSyncError(null);
+            setIniciarLoading(true);
+            try {
+              const rawSecoes = await fetchSecoes(turnoEscolhido);
+              const norm = normalizarSecoesDaApi(rawSecoes);
+              if (!norm.length) {
+                throw new Error("Não há secções ativas para este turno.");
+              }
+
+              const res = await fetch("/api/checklist/iniciar", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  avaliador_nome: avaliador.trim(),
+                  unidade: unidadeNome.trim(),
+                  turno: turnoEscolhido,
+                }),
+              });
+              const json = await res.json().catch(() => ({}));
+              if (!res.ok) throw new Error(json.error || "Não foi possível criar a avaliação.");
+              setSecoesLista(norm);
+              setAvaliacaoId(json.id);
+              setStep("secao");
+            } catch (err) {
+              console.error(err);
+              setSyncError(err.message ?? "Não foi possível criar a avaliação.");
+            } finally {
+              setIniciarLoading(false);
+            }
           }}
           style={{ display: "flex", flexDirection: "column", gap: 0 }}
         >
@@ -322,15 +360,71 @@ function ChecklistView({ onSubmit }) {
               style={{ width: "100%", borderRadius: 8, border: "1.5px solid var(--border)", padding: "12px 14px", fontSize: 15, background: "var(--card-bg)", color: "var(--text-primary)", boxSizing: "border-box" }} />
           </div>
 
-          <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, marginBottom: 24 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 6 }}>Unidade</label>
-            <input value={unidade} onChange={e => setUnidade(e.target.value)} placeholder="Ex: Unidade Centro" autoComplete="organization"
-              style={{ width: "100%", borderRadius: 8, border: "1.5px solid var(--border)", padding: "12px 14px", fontSize: 15, background: "var(--card-bg)", color: "var(--text-primary)", boxSizing: "border-box" }} />
+          <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, marginBottom: 16 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 8 }}>Turno</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[
+                { val: "manha", label: "Manhã" },
+                { val: "tarde", label: "Tarde" },
+              ].map(({ val, label }) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setTurnoEscolhido(val)}
+                  style={{
+                    flex: 1,
+                    padding: "12px",
+                    borderRadius: 10,
+                    border: "1.5px solid",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    borderColor: turnoEscolhido === val ? "var(--accent)" : "var(--border)",
+                    background: turnoEscolhido === val ? "var(--accent)" : "transparent",
+                    color: turnoEscolhido === val ? "#fff" : "var(--text-secondary)",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <button type="submit" disabled={!podeIniciar}
-            style={{ width: "100%", padding: "14px", borderRadius: 10, border: "none", background: podeIniciar ? "var(--accent)" : "var(--border)", color: "#fff", fontSize: 15, fontWeight: 700, cursor: podeIniciar ? "pointer" : "not-allowed" }}>
-            Iniciar Avaliação
+          <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, marginBottom: 24 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 6 }}>Unidade</label>
+            {unidadesLoading ? (
+              <p style={{ margin: 0, fontSize: 14, color: "var(--text-secondary)" }}>Carregando unidades...</p>
+            ) : unidadesErro ? (
+              <p style={{ margin: 0, fontSize: 13, color: "#b91c1c" }}>{unidadesErro}</p>
+            ) : listaUnidades.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>Sem unidades registadas na base.</p>
+            ) : (
+              <select
+                value={unidadeNome}
+                onChange={e => setUnidadeNome(e.target.value)}
+                required
+                style={{ width: "100%", borderRadius: 8, border: "1.5px solid var(--border)", padding: "12px 14px", fontSize: 15, background: "var(--card-bg)", color: "var(--text-primary)", boxSizing: "border-box" }}
+              >
+                <option value="">Selecione a unidade</option>
+                {unidadesPorGrupo.map(([grupo, lista]) => (
+                  <optgroup key={grupo === "" ? "_sem_grupo" : grupo} label={grupo === "" ? "—" : grupo}>
+                    {lista.map((u) => (
+                      <option key={`${grupo}:${u.codigo}`} value={u.nome}>
+                        {u.nome}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {syncError && (
+            <p style={{ margin: "0 0 16px", fontSize: 13, color: "#b91c1c", lineHeight: 1.4 }}>{syncError}</p>
+          )}
+          <button type="submit" disabled={!podeIniciar || iniciarLoading}
+            style={{ width: "100%", padding: "14px", borderRadius: 10, border: "none", background: podeIniciar && !iniciarLoading ? "var(--accent)" : "var(--border)", color: "#fff", fontSize: 15, fontWeight: 700, cursor: podeIniciar && !iniciarLoading ? "pointer" : "not-allowed" }}>
+            {iniciarLoading ? "A iniciar…" : "Iniciar Avaliação"}
           </button>
         </form>
       </div>
@@ -338,7 +432,7 @@ function ChecklistView({ onSubmit }) {
   }
 
   if (step === "concluido") {
-    const pct = Math.round((totalGeral / maxGeral) * 100);
+    const pct = maxGeral > 0 ? Math.round((totalGeral / maxGeral) * 100) : 0;
     const cor = getScoreColor(pct);
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", padding: "32px 16px", textAlign: "center" }}>
@@ -349,22 +443,33 @@ function ChecklistView({ onSubmit }) {
         <p style={{ color: "var(--text-secondary)", margin: "0 0 24px" }}>{totalGeral} de {maxGeral} pontos</p>
 
         <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, marginBottom: 24, textAlign: "left" }}>
-          {SECOES_MOCK.map(s => {
-            const pts = s.perguntas.reduce((a, p) => a + (respostas[p.id]?.pontos || 0), 0);
-            const pctS = Math.round((pts / s.pontos_max) * 100);
+          {secoesLista.map((s) => {
+            const maxS = s.pontos_max ?? 0;
+            const pts = (s.perguntas ?? []).reduce((a, p) => a + (respostas[p.id]?.pontos || 0), 0);
+            const pctS = maxS > 0 ? Math.round((pts / maxS) * 100) : 0;
             return (
               <div key={s.id} style={{ marginBottom: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                   <span style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 500 }}>{s.titulo}</span>
-                  <span style={{ fontSize: 13, color: getScoreColor(pctS), fontWeight: 700 }}>{pts}/{s.pontos_max}</span>
+                  <span style={{ fontSize: 13, color: getScoreColor(pctS), fontWeight: 700 }}>{pts}/{maxS}</span>
                 </div>
-                <ProgressBar value={pts} max={s.pontos_max} color={getScoreColor(pctS)} />
+                <ProgressBar value={pts} max={maxS || 1} color={getScoreColor(pctS)} />
               </div>
             );
           })}
         </div>
 
-        <button type="button" onClick={() => { setStep("identificacao"); setRespostas({}); setSecaoAtual(0); setAvaliador(""); setUnidade(""); }}
+        <button type="button" onClick={() => {
+          setStep("identificacao");
+          setRespostas({});
+          setSecaoAtual(0);
+          setAvaliador("");
+          setUnidadeNome("");
+          setTurnoEscolhido("manha");
+          setSecoesLista([]);
+          setAvaliacaoId(null);
+          setSyncError(null);
+        }}
           style={{ width: "100%", padding: 14, borderRadius: 10, border: "1.5px solid var(--accent)", background: "transparent", color: "var(--accent)", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
           Nova avaliação
         </button>
@@ -372,14 +477,45 @@ function ChecklistView({ onSubmit }) {
     );
   }
 
-  console.log(step);
+  if (!secao) {
+    return (
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "24px 16px", textAlign: "center" }}>
+        <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>
+          Sem dados de secções. Volte e inicie a avaliação de novo.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setStep("identificacao");
+            setSecoesLista([]);
+            setSecaoAtual(0);
+            setAvaliacaoId(null);
+            setSyncError(null);
+          }}
+          style={{
+            marginTop: 16,
+            padding: "12px 20px",
+            borderRadius: 10,
+            border: "1.5px solid var(--accent)",
+            background: "transparent",
+            color: "var(--accent)",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Voltar ao início
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: 540, margin: "0 auto" }}>
       {/* Header fixo com progresso */}
       <div style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)", padding: "12px 16px", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <div>
-            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Seção {secaoAtual + 1} de {SECOES_MOCK.length}</span>
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Seção {secaoAtual + 1} de {secoesLista.length}</span>
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{secao.titulo}</h2>
           </div>
           <div style={{ textAlign: "right" }}>
@@ -389,7 +525,7 @@ function ChecklistView({ onSubmit }) {
         </div>
         {/* Progresso geral (bolinhas) */}
         <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-          {SECOES_MOCK.map((s, i) => (
+          {secoesLista.map((s, i) => (
             <div key={s.id} style={{ flex: 1, height: 4, borderRadius: 2, background: i < secaoAtual ? "var(--accent)" : i === secaoAtual ? "#93c5fd" : "var(--border)" }} />
           ))}
         </div>
@@ -397,6 +533,10 @@ function ChecklistView({ onSubmit }) {
           {respondidasObrig}/{totalObrigatorias} obrigatórias respondidas
         </div>
       </div>
+
+      {syncError && (
+        <div style={{ padding: "8px 16px 0", fontSize: 13, color: "#b91c1c" }}>{syncError}</div>
+      )}
 
       {/* Perguntas */}
       <div style={{ padding: "16px 16px 100px" }}>
@@ -416,13 +556,41 @@ function ChecklistView({ onSubmit }) {
         )}
         <button
           type="button"
-          onClick={() => {
-            if (secaoAtual < SECOES_MOCK.length - 1) setSecaoAtual(s => s + 1);
-            else setStep("concluido");
+          onClick={async () => {
+            if (!avaliacaoId) {
+              setSyncError("Sessão de avaliação inválida. Volte e inicie novamente.");
+              return;
+            }
+            setSyncError(null);
+            setNavegarLoading(true);
+            try {
+              await persistirRespostasDaSecao(avaliacaoId, secao, respostas);
+              if (secaoAtual < secoesLista.length - 1) {
+                setSecaoAtual((s) => s + 1);
+              } else {
+                const resFim = await fetch("/api/checklist/concluir", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ avaliacao_id: avaliacaoId }),
+                });
+                const jsonFim = await resFim.json().catch(() => ({}));
+                if (!resFim.ok) throw new Error(jsonFim.error || "Não foi possível concluir a avaliação.");
+                setStep("concluido");
+              }
+            } catch (err) {
+              console.error(err);
+              setSyncError(err.message ?? "Não foi possível guardar as respostas.");
+            } finally {
+              setNavegarLoading(false);
+            }
           }}
-          disabled={!podeProsseguir}
-          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: podeProsseguir ? "var(--accent)" : "var(--border)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: podeProsseguir ? "pointer" : "not-allowed" }}>
-          {secaoAtual < SECOES_MOCK.length - 1 ? "Próxima seção →" : "Concluir avaliação"}
+          disabled={!podeProsseguir || navegarLoading}
+          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: podeProsseguir && !navegarLoading ? "var(--accent)" : "var(--border)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: podeProsseguir && !navegarLoading ? "pointer" : "not-allowed" }}>
+          {navegarLoading
+            ? "A guardar…"
+            : secaoAtual < secoesLista.length - 1
+              ? "Próxima seção →"
+              : "Concluir avaliação"}
         </button>
       </div>
     </div>
