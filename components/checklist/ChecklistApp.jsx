@@ -7,6 +7,9 @@ const UUID_PERGUNTA = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 
 const TEXTO_SUBTURNO = { manha: "Turno da manhã", tarde: "Turno da tarde" };
 
+/** Temporário: voltar a `true` para mostrar botão + preview de foto nas perguntas. */
+const EXIBIR_OPCAO_FOTO_NAS_PERGUNTAS = false;
+
 function normalizarOpcoes(opcoes) {
   let o = opcoes;
   if (typeof o === "string") {
@@ -165,7 +168,7 @@ function PerguntaCard({ pergunta, resposta, onChange, perguntasPai }) {
       )}
 
       <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
-        {pergunta.permite_foto && (
+        {EXIBIR_OPCAO_FOTO_NAS_PERGUNTAS && pergunta.permite_foto && (
           <>
             <button type="button" onClick={() => fileRef.current?.click()}
               style={{ fontSize: 12, color: "var(--accent)", background: "var(--accent-soft)", border: "none", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontWeight: 500 }}>
