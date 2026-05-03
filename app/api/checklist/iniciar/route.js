@@ -15,6 +15,7 @@ export async function POST(request) {
     }
 
     const nome = avaliador_nome.trim();
+    const tipo_avaliador = body.tipo_avaliador?.trim() || "gerente";
     const supabase = createServiceRoleClient();
 
     const { data, error } = await supabase
@@ -24,6 +25,7 @@ export async function POST(request) {
         avaliador_nome: nome,
         unidade: unidade.trim(),
         turno,
+        tipo_avaliador,
         checkin_em: new Date().toISOString(),
       })
       .select()

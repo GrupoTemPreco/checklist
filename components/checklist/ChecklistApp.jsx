@@ -243,7 +243,7 @@ async function persistirRespostasDaSecao(avaliacao_id, sec, respostas) {
 }
 
 // ─── VIEW: CHECKLIST (formulário) ───────────────────────────────────────────
-function ChecklistView() {
+function ChecklistView({ userPerfil }) {
   const [step, setStep] = useState("identificacao"); // identificacao | secao | concluido
   const [secaoAtual, setSecaoAtual] = useState(0);
   const [avaliador, setAvaliador] = useState("");
@@ -338,6 +338,7 @@ function ChecklistView() {
                   avaliador_nome: avaliador.trim(),
                   unidade: unidadeNome.trim(),
                   turno: turnoEscolhido,
+                  tipo_avaliador: userPerfil === "supervisor" ? "supervisor" : "gerente",
                 }),
               });
               const json = await res.json().catch(() => ({}));
@@ -731,7 +732,7 @@ export default function ChecklistApp({ userPerfil = "supervisor" }) {
         )}
       </div>
 
-      {aba === "checklist" ? <ChecklistView /> : <DashboardView />}
+      {aba === "checklist" ? <ChecklistView userPerfil={userPerfil} /> : <DashboardView />}
     </div>
   );
 }
