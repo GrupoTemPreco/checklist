@@ -319,7 +319,8 @@ function ChecklistView({ userPerfil }) {
             setSyncError(null);
             setIniciarLoading(true);
             try {
-              const rawSecoes = await fetchSecoes(turnoEscolhido);
+              const turnoParaBusca = userPerfil === "supervisor" ? "tarde" : turnoEscolhido;
+              const rawSecoes = await fetchSecoes(turnoParaBusca);
               const norm = normalizarSecoesDaApi(rawSecoes);
               if (!norm.length) {
                 throw new Error("Não há secções ativas para este turno.");
