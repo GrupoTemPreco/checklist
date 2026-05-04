@@ -82,6 +82,44 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
+function formatDateTimePt(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+async function eliminarAvaliacaoApi(avaliacao_id) {
+  const res = await fetch("/api/checklist/avaliacao", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ avaliacao_id }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || "Falha ao eliminar a avaliação.");
+}
+
+/** Resposta da API → estado do formulário por `pergunta.id`. */
+function respostasPersistidasParaEstado(rows) {
+  const estado = {};
+  for (const r of rows ?? []) {
+    const pid = r.pergunta_id != null ? String(r.pergunta_id) : "";
+    if (!pid) continue;
+    estado[pid] = {
+      valor: r.valor != null && r.valor !== "" ? String(r.valor) : "",
+      pontos: Number(r.pontos_obtidos) || 0,
+      comentario: r.comentario ?? "",
+      plano_acao: r.plano_acao ?? "",
+      foto_url: r.foto_url ?? "",
+    };
+  }
+  return estado;
+}
+
 // ─── COMPONENTE: PERGUNTA ───────────────────────────────────────────────────
 function PerguntaCard({ pergunta, resposta, onChange, perguntasPai }) {
   const [showPlanoAcao, setShowPlanoAcao] = useState(false);
@@ -252,6 +290,10 @@ function ChecklistView({ userPerfil }) {
   const [syncError, setSyncError] = useState(null);
   const [iniciarLoading, setIniciarLoading] = useState(false);
   const [navegarLoading, setNavegarLoading] = useState(false);
+  const [adminModoChecklist, setAdminModoChecklist] = useState("supervisor"); // supervisor | gerente — só usa quando userPerfil === "admin"
+  const [modalSairOpen, setModalSairOpen] = useState(false);
+  const [modalContinuar, setModalContinuar] = useState({ open: false, avaliacao: null });
+  const [toastAviso, setToastAviso] = useState("");
 
   useEffect(() => {
     let cancel = false;
@@ -297,18 +339,109 @@ function ChecklistView({ userPerfil }) {
 
   const maxGeral = secoesLista.reduce((acc, s) => acc + (s.pontos_max ?? 0), 0);
 
+  const atuaComoSupervisor =
+    userPerfil === "supervisor" ||
+    (userPerfil === "admin" && adminModoChecklist === "supervisor");
+
+  const voltarAoInicioChecklist = () => {
+    setStep("identificacao");
+    setSecaoAtual(0);
+    setSecoesLista([]);
+    setRespostas({});
+    setAvaliacaoId(null);
+    setSyncError(null);
+    setModalSairOpen(false);
+  };
+
+  async function iniciarNovaAvaliacao() {
+    const turnoParaBusca = atuaComoSupervisor ? "tarde" : turnoEscolhido;
+    const rawSecoes = await fetchSecoes(turnoParaBusca);
+    const norm = normalizarSecoesDaApi(rawSecoes);
+    if (!norm.length) {
+      throw new Error("Não há secções ativas para este turno.");
+    }
+    const res = await fetch("/api/checklist/iniciar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        avaliador_nome: avaliador.trim(),
+        unidade: unidadeNome.trim(),
+        turno: turnoEscolhido,
+        tipo_avaliador: atuaComoSupervisor ? "supervisor" : "gerente",
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || "Não foi possível criar a avaliação.");
+    setSecoesLista(norm);
+    setRespostas({});
+    setAvaliacaoId(json.id);
+    setSecaoAtual(0);
+    setToastAviso("");
+    setStep("secao");
+  }
+
   if (step === "identificacao") {
     const podeIniciar =
       Boolean(avaliador.trim() && unidadeNome.trim()) && !unidadesLoading && listaUnidades.length > 0;
+
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", padding: "24px 16px" }}>
+        {toastAviso && (
+          <div
+            role="status"
+            style={{
+              marginBottom: 16,
+              padding: "12px 14px",
+              borderRadius: 10,
+              fontSize: 13,
+              color: "#0f172a",
+              background: "#e0f2fe",
+              border: "1px solid #93c5fd",
+            }}
+          >
+            {toastAviso}
+          </div>
+        )}
+        {userPerfil === "admin" && (
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 8 }}>
+              Tipo de checklist
+            </label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[
+                { val: "supervisor", label: "Supervisão" },
+                { val: "gerente", label: "Encarregado" },
+              ].map(({ val, label }) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setAdminModoChecklist(val)}
+                  style={{
+                    flex: 1,
+                    padding: "12px",
+                    borderRadius: 10,
+                    border: "1.5px solid",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    borderColor: adminModoChecklist === val ? "var(--accent)" : "var(--border)",
+                    background: adminModoChecklist === val ? "var(--accent)" : "transparent",
+                    color: adminModoChecklist === val ? "#fff" : "var(--text-secondary)",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div style={{ textAlign: "center", marginBottom: 32 }}>
           <div style={{ width: 56, height: 56, background: "var(--accent)", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px", fontSize: 24 }}>
             <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#fff" strokeWidth="2.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12l2 2 4-4"/></svg>
           </div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>Avaliação de Loja</h1>
           <p style={{ margin: "4px 0 0", fontSize: 14, color: "var(--text-secondary)" }}>
-            {TEXTO_SUBTURNO[turnoEscolhido]} — Supervisão
+            {TEXTO_SUBTURNO[turnoEscolhido]} — {atuaComoSupervisor ? "Supervisão" : "Encarregado"}
           </p>
         </div>
 
@@ -317,30 +450,24 @@ function ChecklistView({ userPerfil }) {
             e.preventDefault();
             if (!avaliador.trim() || !unidadeNome.trim()) return;
             setSyncError(null);
+            setToastAviso("");
             setIniciarLoading(true);
             try {
-              const turnoParaBusca = userPerfil === "supervisor" ? "tarde" : turnoEscolhido;
-              const rawSecoes = await fetchSecoes(turnoParaBusca);
-              const norm = normalizarSecoesDaApi(rawSecoes);
-              if (!norm.length) {
-                throw new Error("Não há secções ativas para este turno.");
+              const qs = new URLSearchParams({
+                nome: avaliador.trim(),
+                unidade: unidadeNome.trim(),
+              });
+              const chkRes = await fetch(`/api/checklist/avaliacoes/em-andamento?${qs}`);
+              const chkJson = await chkRes.json().catch(() => ({}));
+              if (!chkRes.ok) throw new Error(chkJson.error || "Falha ao verificar avaliações em curso.");
+
+              if (chkJson.avaliacao?.id) {
+                setModalContinuar({ open: true, avaliacao: chkJson.avaliacao });
+                setIniciarLoading(false);
+                return;
               }
 
-              const res = await fetch("/api/checklist/iniciar", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  avaliador_nome: avaliador.trim(),
-                  unidade: unidadeNome.trim(),
-                  turno: turnoEscolhido,
-                  tipo_avaliador: userPerfil === "supervisor" ? "supervisor" : "gerente",
-                }),
-              });
-              const json = await res.json().catch(() => ({}));
-              if (!res.ok) throw new Error(json.error || "Não foi possível criar a avaliação.");
-              setSecoesLista(norm);
-              setAvaliacaoId(json.id);
-              setStep("secao");
+              await iniciarNovaAvaliacao();
             } catch (err) {
               console.error(err);
               setSyncError(err.message ?? "Não foi possível criar a avaliação.");
@@ -423,6 +550,125 @@ function ChecklistView({ userPerfil }) {
             {iniciarLoading ? "A iniciar…" : "Iniciar Avaliação"}
           </button>
         </form>
+
+        {modalContinuar.open && modalContinuar.avaliacao && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 200,
+              background: "rgba(15,23,42,0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              style={{
+                maxWidth: 400,
+                width: "100%",
+                borderRadius: 14,
+                padding: 20,
+                background: "var(--card-bg, #fff)",
+                border: "1px solid var(--border, #e2e8f0)",
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <p style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 700, color: "var(--text-primary, #0f172a)" }}>
+                Avaliação em andamento
+              </p>
+              <p style={{ margin: "0 0 16px", fontSize: 14, color: "var(--text-secondary, #64748b)", lineHeight: 1.45 }}>
+                Já existe um rascunho para este avaliador e unidade.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={iniciarLoading}
+                  onClick={async () => {
+                    const av = modalContinuar.avaliacao;
+                    setModalContinuar({ open: false, avaliacao: null });
+                    setToastAviso("");
+                    setIniciarLoading(true);
+                    setSyncError(null);
+                    try {
+                      const tipo = av.tipo_avaliador ?? "gerente";
+                      const turnoBusca =
+                        tipo === "supervisor" ? "tarde" : av.turno || "manha";
+                      const rawSecoes = await fetchSecoes(turnoBusca);
+                      const norm = normalizarSecoesDaApi(rawSecoes);
+                      if (!norm.length) {
+                        throw new Error("Não há secções ativas para este turno.");
+                      }
+                      setSecoesLista(norm);
+                      setRespostas(respostasPersistidasParaEstado(av.respostas));
+                      setAvaliacaoId(av.id);
+                      setSecaoAtual(0);
+                      setStep("secao");
+                    } catch (err) {
+                      console.error(err);
+                      setSyncError(err.message ?? "Não foi possível retomar a avaliação.");
+                    } finally {
+                      setIniciarLoading(false);
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    borderRadius: 10,
+                    border: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: iniciarLoading ? "not-allowed" : "pointer",
+                    background: "var(--accent, #0ea5e9)",
+                    color: "#fff",
+                  }}
+                >
+                  Continuar avaliação de{" "}
+                  {formatDateTimePt(modalContinuar.avaliacao.checkin_em || modalContinuar.avaliacao.criado_em)}
+                </button>
+                <button
+                  type="button"
+                  disabled={iniciarLoading}
+                  onClick={async () => {
+                    const avId = modalContinuar.avaliacao.id;
+                    setModalContinuar({ open: false, avaliacao: null });
+                    setToastAviso("A avaliação em curso será eliminada.");
+                    setSyncError(null);
+                    setIniciarLoading(true);
+                    try {
+                      await eliminarAvaliacaoApi(avId);
+                      await iniciarNovaAvaliacao();
+                    } catch (err) {
+                      console.error(err);
+                      setSyncError(err.message ?? "Não foi possível substituir a avaliação.");
+                    } finally {
+                      setIniciarLoading(false);
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    borderRadius: 10,
+                    border: "1.5px solid var(--border, #e2e8f0)",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: iniciarLoading ? "not-allowed" : "pointer",
+                    background: "transparent",
+                    color: "var(--text-primary, #0f172a)",
+                  }}
+                >
+                  Nova avaliação{" "}
+                  <span style={{ fontWeight: 500, opacity: 0.85 }}>
+                    (elimina a anterior)
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -510,11 +756,31 @@ function ChecklistView({ userPerfil }) {
       {/* Header fixo com progresso */}
       <div style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)", padding: "12px 16px", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <div>
-            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Seção {secaoAtual + 1} de {secoesLista.length}</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                Seção {secaoAtual + 1} de {secoesLista.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => setModalSairOpen(true)}
+                style={{
+                  padding: "4px 8px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--text-secondary)",
+                  textDecoration: "underline",
+                }}
+              >
+                Sair
+              </button>
+            </div>
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{secao.titulo}</h2>
           </div>
-          <div style={{ textAlign: "right" }}>
+          <div style={{ marginLeft: 12, textAlign: "right" }}>
             <span style={{ fontSize: 18, fontWeight: 800, color: getScoreColor(pontosMaxSecao > 0 ? Math.round((pontosSecao/pontosMaxSecao)*100) : 0) }}>{pontosSecao}</span>
             <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>/{pontosMaxSecao}pts</span>
           </div>
@@ -589,6 +855,107 @@ function ChecklistView({ userPerfil }) {
               : "Concluir avaliação"}
         </button>
       </div>
+
+      {modalSairOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 200,
+            background: "rgba(15,23,42,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              maxWidth: 400,
+              width: "100%",
+              borderRadius: 14,
+              padding: 20,
+              background: "var(--card-bg)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            <p style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+              Sair da avaliação
+            </p>
+            <p style={{ margin: "0 0 16px", fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+              A avaliação continua como <strong>em andamento</strong> na base, salvo se optar por eliminar agora.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => voltarAoInicioChecklist()}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  border: "none",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  background: "var(--accent)",
+                  color: "#fff",
+                }}
+              >
+                Salvar e sair
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!avaliacaoId) {
+                    voltarAoInicioChecklist();
+                    return;
+                  }
+                  setSyncError(null);
+                  try {
+                    await eliminarAvaliacaoApi(avaliacaoId);
+                  } catch (err) {
+                    console.error(err);
+                    setSyncError(err.message ?? "Não foi possível eliminar a avaliação.");
+                    return;
+                  }
+                  voltarAoInicioChecklist();
+                }}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  border: "1.5px solid #fecaca",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  background: "#fef2f2",
+                  color: "#991b1b",
+                }}
+              >
+                Descartar e sair
+              </button>
+              <button
+                type="button"
+                onClick={() => setModalSairOpen(false)}
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  border: "none",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  background: "transparent",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
