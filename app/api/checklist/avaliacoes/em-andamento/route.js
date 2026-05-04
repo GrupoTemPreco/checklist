@@ -22,6 +22,16 @@ export async function GET(request) {
       );
     }
 
+    const turnosValidos = ["manha", "tarde", "noite"];
+    const turnoRaw = searchParams.get("turno")?.trim();
+    const turno = turnosValidos.includes(turnoRaw) ? turnoRaw : null;
+    if (!turno) {
+      return NextResponse.json(
+        { error: "turno deve ser manha, tarde ou noite." },
+        { status: 400 }
+      );
+    }
+
     const supabase = createServiceRoleClient();
 
     const { data, error } = await supabase
@@ -50,6 +60,7 @@ export async function GET(request) {
       .eq("avaliador_nome", nome)
       .eq("unidade", unidade)
       .eq("tipo_avaliador", tipo_avaliador)
+      .eq("turno", turno)
       .order("checkin_em", { ascending: false, nullsFirst: false })
       .order("criado_em", { ascending: false })
       .limit(1)

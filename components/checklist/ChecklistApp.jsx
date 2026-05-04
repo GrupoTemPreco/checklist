@@ -457,6 +457,7 @@ function ChecklistView({ userPerfil }) {
                 nome: avaliador.trim(),
                 unidade: unidadeNome.trim(),
                 tipo_avaliador: atuaComoSupervisor ? "supervisor" : "gerente",
+                turno: turnoEscolhido,
               });
               const chkRes = await fetch(`/api/checklist/avaliacoes/em-andamento?${qs}`);
               const chkJson = await chkRes.json().catch(() => ({}));
@@ -758,27 +759,9 @@ function ChecklistView({ userPerfil }) {
       <div style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)", padding: "12px 16px", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                Seção {secaoAtual + 1} de {secoesLista.length}
-              </span>
-              <button
-                type="button"
-                onClick={() => setModalSairOpen(true)}
-                style={{
-                  padding: "4px 8px",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  border: "none",
-                  background: "transparent",
-                  color: "var(--text-secondary)",
-                  textDecoration: "underline",
-                }}
-              >
-                Sair
-              </button>
-            </div>
+            <span style={{ fontSize: 12, color: "var(--text-secondary)", display: "block", marginBottom: 2 }}>
+              Seção {secaoAtual + 1} de {secoesLista.length}
+            </span>
             <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{secao.titulo}</h2>
           </div>
           <div style={{ marginLeft: 12, textAlign: "right" }}>
@@ -810,13 +793,30 @@ function ChecklistView({ userPerfil }) {
       </div>
 
       {/* Footer com navegação */}
-      <div style={{ position: "sticky", bottom: 0, background: "var(--bg)", borderTop: "1px solid var(--border)", padding: "12px 16px", display: "flex", gap: 10 }}>
+      <div style={{ position: "sticky", bottom: 0, background: "var(--bg)", borderTop: "1px solid var(--border)", padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "stretch" }}>
         {secaoAtual > 0 && (
           <button type="button" onClick={() => setSecaoAtual(s => s - 1)}
-            style={{ flex: 1, padding: "12px", borderRadius: 10, border: "1.5px solid var(--border)", background: "transparent", color: "var(--text-primary)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+            style={{ flex: "1 1 100px", minWidth: 90, padding: "12px", borderRadius: 10, border: "1.5px solid var(--border)", background: "transparent", color: "var(--text-primary)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
             Anterior
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => setModalSairOpen(true)}
+          style={{
+            flex: "0 0 auto",
+            padding: "12px 14px",
+            borderRadius: 10,
+            border: "1.5px solid #dc2626",
+            background: "#fef2f2",
+            color: "#b91c1c",
+            fontSize: 14,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Sair
+        </button>
         <button
           type="button"
           onClick={async () => {
@@ -848,7 +848,7 @@ function ChecklistView({ userPerfil }) {
             }
           }}
           disabled={!podeProsseguir || navegarLoading}
-          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: podeProsseguir && !navegarLoading ? "var(--accent)" : "var(--border)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: podeProsseguir && !navegarLoading ? "pointer" : "not-allowed" }}>
+          style={{ flex: "2 1 140px", minWidth: 120, padding: "12px", borderRadius: 10, border: "none", background: podeProsseguir && !navegarLoading ? "var(--accent)" : "var(--border)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: podeProsseguir && !navegarLoading ? "pointer" : "not-allowed" }}>
           {navegarLoading
             ? "A guardar…"
             : secaoAtual < secoesLista.length - 1
@@ -886,7 +886,7 @@ function ChecklistView({ userPerfil }) {
               Sair da avaliação
             </p>
             <p style={{ margin: "0 0 16px", fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.45 }}>
-              A avaliação continua como <strong>em andamento</strong> na base, salvo se optar por eliminar agora.
+              se optar por salvar e sair, essa avaliação poderá ser continuada depois.
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <button
