@@ -6,9 +6,18 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const nome = searchParams.get("nome")?.trim();
     const unidade = searchParams.get("unidade")?.trim();
+    const tipoRaw = searchParams.get("tipo_avaliador")?.trim();
+    const tipo_avaliador =
+      tipoRaw === "gerente" || tipoRaw === "supervisor" ? tipoRaw : null;
     if (!nome || !unidade) {
       return NextResponse.json(
         { error: "nome e unidade são obrigatórios." },
+        { status: 400 }
+      );
+    }
+    if (!tipo_avaliador) {
+      return NextResponse.json(
+        { error: "tipo_avaliador deve ser gerente ou supervisor." },
         { status: 400 }
       );
     }
@@ -40,6 +49,7 @@ export async function GET(request) {
       .eq("status", "em_andamento")
       .eq("avaliador_nome", nome)
       .eq("unidade", unidade)
+      .eq("tipo_avaliador", tipo_avaliador)
       .order("checkin_em", { ascending: false, nullsFirst: false })
       .order("criado_em", { ascending: false })
       .limit(1)

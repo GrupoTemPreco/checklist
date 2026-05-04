@@ -456,6 +456,7 @@ function ChecklistView({ userPerfil }) {
               const qs = new URLSearchParams({
                 nome: avaliador.trim(),
                 unidade: unidadeNome.trim(),
+                tipo_avaliador: atuaComoSupervisor ? "supervisor" : "gerente",
               });
               const chkRes = await fetch(`/api/checklist/avaliacoes/em-andamento?${qs}`);
               const chkJson = await chkRes.json().catch(() => ({}));
