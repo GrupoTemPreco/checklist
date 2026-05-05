@@ -1,31 +1,24 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase-service";
-
-function mapRespostas(rows) {
-  return (rows ?? []).map((r) => {
-    const perg = r.perguntas;
-    const secao_id =
-      perg && !Array.isArray(perg)
-        ? perg.secao_id
-        : Array.isArray(perg)
-          ? perg[0]?.secao_id
-          : null;
-    return {
-      secao_id,
-      pergunta_id: r.pergunta_id,
-      resposta_label: r.valor != null ? String(r.valor) : "",
-      pontos_obtidos: Number(r.pontos_obtidos) || 0,
-    };
-  });
-}
+import { mapRespostasParaApi } from "@/lib/avaliacoes-resposta-map";
 
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const uid = searchParams.get("uid")?.trim();
-    if (!uid) {
+    const perfil = searchParams.get("perfil")?.trim();
+    const uid = searchParams.get("uid")?.trim() || "";
+    const unidadeFiltro = searchParams.get("unidade")?.trim() || null;
+
+    if (perfil !== "gerente" && perfil !== "supervisor") {
       return NextResponse.json(
-        { error: "uid é obrigatório." },
+        { error: "perfil deve ser gerente ou supervisor." },
+        { status: 400 }
+      );
+    }
+
+    if (perfil === "gerente" && !uid) {
+      return NextResponse.json(
+        { error: "uid é obrigatório para perfil gerente." },
         { status: 400 }
       );
     }
@@ -34,7 +27,7 @@ export async function GET(request) {
 
     const { data: secoesRaw, error: errSecoes } = await supabase
       .from("secoes")
-      .select("id, ordem, titulo, pontos_max")
+      .select("id, ordem, titulo, pontos_max, turno")
       .eq("ativo", true)
       .order("ordem", { ascending: true });
 
@@ -42,7 +35,7 @@ export async function GET(request) {
       return NextResponse.json({ error: errSecoes.message }, { status: 400 });
     }
 
-    const { data: avalRaw, error: errAval } = await supabase
+    let q = supabase
       .from("avaliacoes")
       .select(
         `
@@ -61,12 +54,23 @@ export async function GET(request) {
           pergunta_id,
           valor,
           pontos_obtidos,
-          perguntas ( secao_id )
+          comentario,
+          plano_acao,
+          perguntas ( secao_id, texto, codigo, tipo, opcoes )
         )
       `
       )
-      .eq("status", "concluida")
-      .eq("usuario_id", uid)
+      .eq("status", "concluida");
+
+    if (perfil === "gerente") {
+      q = q.eq("usuario_id", uid);
+    }
+
+    if (unidadeFiltro) {
+      q = q.eq("unidade", unidadeFiltro);
+    }
+
+    const { data: avalRaw, error: errAval } = await q
       .order("checkout_em", { ascending: false, nullsFirst: false })
       .order("criado_em", { ascending: false });
 
@@ -79,6 +83,7 @@ export async function GET(request) {
       ordem: s.ordem,
       titulo: s.titulo,
       pontos_max: Number(s.pontos_max) || 0,
+      turno: s.turno != null ? String(s.turno) : null,
     }));
 
     const avaliacoes = (avalRaw ?? []).map((av) => ({
@@ -93,7 +98,7 @@ export async function GET(request) {
       checkout_em: av.checkout_em,
       status: av.status,
       tipo_avaliador: av.tipo_avaliador ?? null,
-      respostas: mapRespostas(av.respostas),
+      respostas: mapRespostasParaApi(av.respostas),
     }));
 
     return NextResponse.json({ secoes, avaliacoes });

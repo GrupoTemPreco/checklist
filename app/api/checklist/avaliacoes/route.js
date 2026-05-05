@@ -1,18 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase-service";
-
-function mapRespostas(rows) {
-  return (rows ?? []).map((r) => {
-    const perg = r.perguntas;
-    const secao_id = perg && !Array.isArray(perg) ? perg.secao_id : Array.isArray(perg) ? perg[0]?.secao_id : null;
-    return {
-      secao_id,
-      pergunta_id: r.pergunta_id,
-      resposta_label: r.valor != null ? String(r.valor) : "",
-      pontos_obtidos: Number(r.pontos_obtidos) || 0,
-    };
-  });
-}
+import { mapRespostasParaApi } from "@/lib/avaliacoes-resposta-map";
 
 export async function GET(request) {
   try {
@@ -24,11 +12,20 @@ export async function GET(request) {
 
     const supabase = createServiceRoleClient();
 
-    const { data: secoesRaw, error: errSecoes } = await supabase
+    let qSec = supabase
       .from("secoes")
       .select("id, ordem, titulo, pontos_max")
-      .eq("ativo", true)
-      .order("ordem", { ascending: true });
+      .eq("ativo", true);
+
+    if (tipo === "gerente") {
+      qSec = qSec.eq("turno", "manha");
+    } else if (tipo === "supervisor") {
+      qSec = qSec.eq("turno", "tarde");
+    }
+
+    const { data: secoesRaw, error: errSecoes } = await qSec.order("ordem", {
+      ascending: true,
+    });
 
     if (errSecoes) {
       return NextResponse.json({ error: errSecoes.message }, { status: 400 });
@@ -53,7 +50,9 @@ export async function GET(request) {
           pergunta_id,
           valor,
           pontos_obtidos,
-          perguntas ( secao_id )
+          comentario,
+          plano_acao,
+          perguntas ( secao_id, texto, codigo, tipo, opcoes )
         )
       `
       )
@@ -93,7 +92,7 @@ export async function GET(request) {
       checkout_em: av.checkout_em,
       status: av.status,
       tipo_avaliador: av.tipo_avaliador ?? null,
-      respostas: mapRespostas(av.respostas),
+      respostas: mapRespostasParaApi(av.respostas),
     }));
 
     return NextResponse.json({ secoes, avaliacoes });

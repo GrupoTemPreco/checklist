@@ -15,6 +15,8 @@ export async function GET(request) {
       .order("grupo", { ascending: true })
       .order("nome", { ascending: true });
 
+    // gerente (+ uid): só unidades onde este utilizador é o gerente
+    // supervisor (ou sem filtro gerente): todas as unidades
     if (perfil === "gerente" && uid != null) {
       q = q.eq("gerente_uid", uid);
     }

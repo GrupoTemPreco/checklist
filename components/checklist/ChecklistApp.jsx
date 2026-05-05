@@ -1,7 +1,8 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { perguntaIdPorCodigo } from "@/lib/perguntaDbIds";
 import { perguntaEstaAtiva } from "@/lib/checklist-queries";
+import { turnoModeloPorTipoAvaliador } from "@/lib/avaliacoes-resposta-map";
 import { fetchSecoes } from "@/lib/supabase";
 
 const UUID_PERGUNTA = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
@@ -71,6 +72,22 @@ function perguntasVisiveisNaSecao(secao, respostas) {
     const pai = respostas[p.pergunta_pai_id];
     return pai?.valor === p.resposta_pai_gatilho;
   }) ?? [];
+}
+
+/** Respostas do formulário no formato consumido por `montarPorSecao` (como no histórico). */
+function respostasFormParaMontarPorSecao(secoesLista, estadoRespostas) {
+  const out = [];
+  for (const sec of secoesLista ?? []) {
+    for (const p of perguntasVisiveisNaSecao(sec, estadoRespostas)) {
+      const r = estadoRespostas[p.id];
+      if (!r || r.valor === undefined || r.valor === "") continue;
+      out.push({
+        secao_id: sec.id,
+        pontos_obtidos: Number(r.pontos) || 0,
+      });
+    }
+  }
+  return out;
 }
 
 // ─── UTILITÁRIOS ────────────────────────────────────────────────────────────
@@ -250,6 +267,213 @@ function ProgressBar({ value, max, color }) {
   );
 }
 
+/** Resultado por seção com acordeão: perguntas e respostas da avaliação (Análise / histórico). */
+function ResultadoPorSecaoExpandivel({ linhasPorSecao, respostas, avaliacaoKey }) {
+  const [abertas, setAbertas] = useState(() => new Set());
+
+  useEffect(() => {
+    setAbertas(new Set());
+  }, [avaliacaoKey]);
+
+  const porSecaoRespostas = useMemo(() => {
+    const m = new Map();
+    for (const r of respostas ?? []) {
+      const sid = r.secao_id;
+      if (sid == null) continue;
+      const k = String(sid);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(r);
+    }
+    for (const arr of m.values()) {
+      arr.sort((a, b) =>
+        String(a.pergunta_codigo ?? "").localeCompare(String(b.pergunta_codigo ?? ""), "pt", {
+          sensitivity: "base",
+          numeric: true,
+        })
+      );
+    }
+    return m;
+  }, [respostas]);
+
+  function toggle(secaoId) {
+    const id = String(secaoId);
+    setAbertas((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  return (
+    <div
+      style={{
+        background: "var(--card-bg)",
+        border: "1px solid var(--border)",
+        borderRadius: 14,
+        padding: 20,
+      }}
+    >
+      <h3 style={{ margin: "0 0 16px", fontSize: 15, color: "var(--text-primary)" }}>
+        Resultado por seção
+      </h3>
+      {linhasPorSecao.map((s) => {
+        const sid = String(s.secao_id);
+        const open = abertas.has(sid);
+        const perguntasLista = porSecaoRespostas.get(sid) ?? [];
+        return (
+          <div key={s.secao_id} style={{ marginBottom: 16 }}>
+            <button
+              type="button"
+              onClick={() => toggle(s.secao_id)}
+              style={{
+                display: "flex",
+                width: "100%",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 4px",
+                marginBottom: 6,
+                border: "none",
+                background: open ? "var(--accent-soft)" : "transparent",
+                borderRadius: 8,
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <span style={{ fontSize: 12, width: 18, color: "var(--text-secondary)" }}>
+                {open ? "▼" : "▶"}
+              </span>
+              <span
+                style={{
+                  flex: 1,
+                  fontSize: 14,
+                  color: "var(--text-primary)",
+                  fontWeight: 600,
+                }}
+              >
+                {s.titulo}
+              </span>
+              <span
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: getScoreColor(s.percentual),
+                }}
+              >
+                {s.percentual}%
+              </span>
+            </button>
+            <div style={{ paddingLeft: 26 }}>
+              <ProgressBar
+                value={s.percentual}
+                max={100}
+                color={getScoreColor(s.percentual)}
+              />
+            </div>
+            {open && (
+              <div
+                style={{
+                  marginTop: 10,
+                  marginLeft: 18,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                {perguntasLista.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
+                    Sem respostas registadas nesta seção.
+                  </p>
+                ) : (
+                  perguntasLista.map((r, idx) => (
+                    <div
+                      key={`${r.pergunta_id}-${idx}`}
+                      style={{
+                        paddingBottom: idx < perguntasLista.length - 1 ? 14 : 0,
+                        marginBottom: idx < perguntasLista.length - 1 ? 14 : 0,
+                        borderBottom:
+                          idx < perguntasLista.length - 1 ? "1px solid var(--border)" : "none",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "flex-start",
+                          marginBottom: 4,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: "var(--accent)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {r.pergunta_codigo || "—"}
+                        </span>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: 13,
+                            color: "var(--text-primary)",
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          {r.pergunta_texto || "Pergunta"}
+                        </p>
+                      </div>
+                      <p
+                        style={{
+                          margin: "6px 0 0",
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        {r.resposta_exibicao ?? r.resposta_label ?? "—"}
+                      </p>
+                      {r.pergunta_tipo !== "texto_livre" &&
+                        r.pergunta_tipo !== "nota_livre" &&
+                        r.comentario && (
+                          <p
+                            style={{
+                              margin: "6px 0 0",
+                              fontSize: 12,
+                              color: "var(--text-secondary)",
+                            }}
+                          >
+                            Comentário: {r.comentario}
+                          </p>
+                        )}
+                      {r.plano_acao && (
+                        <p style={{ margin: "6px 0 0", fontSize: 12, color: "#c2410c" }}>
+                          Plano de ação: {r.plano_acao}
+                        </p>
+                      )}
+                      <p
+                        style={{
+                          margin: "6px 0 0",
+                          fontSize: 11,
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        +{r.pontos_obtidos} pts
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 async function persistirRespostasDaSecao(avaliacao_id, sec, respostas) {
   const lista = perguntasVisiveisNaSecao(sec, respostas);
   const items = [];
@@ -307,17 +531,34 @@ function ChecklistView({ userPerfil, uid }) {
   const [historicoLoading, setHistoricoLoading] = useState(false);
   const [historicoError, setHistoricoError] = useState(null);
   const [historicoDetalhe, setHistoricoDetalhe] = useState(null);
+  const [conclusaoVerRespostasDetalhe, setConclusaoVerRespostasDetalhe] = useState(false);
+  const [historicoFiltroUnidade, setHistoricoFiltroUnidade] = useState("");
+  const [listaUnidadesHistorico, setListaUnidadesHistorico] = useState([]);
+  const [historicoUnidadesLoading, setHistoricoUnidadesLoading] = useState(false);
+
+  const atuaComoSupervisor =
+    userPerfil === "supervisor" ||
+    (userPerfil === "admin" && adminModoChecklist === "supervisor");
+  const podeVerHistoricoAvaliacoes = atuaComoSupervisor || uid != null;
 
   useEffect(() => {
-    if (step !== "historico" || uid == null) return;
+    if (step !== "historico") return;
     let cancel = false;
+    if (!atuaComoSupervisor && uid == null) return;
     (async () => {
       setHistoricoLoading(true);
       setHistoricoError(null);
       try {
-        const res = await fetch(
-          `/api/checklist/avaliacoes/historico?uid=${encodeURIComponent(String(uid))}`
-        );
+        const params = new URLSearchParams();
+        if (atuaComoSupervisor) {
+          params.set("perfil", "supervisor");
+        } else {
+          params.set("perfil", "gerente");
+          params.set("uid", String(uid));
+        }
+        const u = historicoFiltroUnidade.trim();
+        if (u) params.set("unidade", u);
+        const res = await fetch(`/api/checklist/avaliacoes/historico?${params}`);
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json.error || "Falha ao carregar histórico.");
         if (cancel) return;
@@ -332,7 +573,36 @@ function ChecklistView({ userPerfil, uid }) {
     return () => {
       cancel = true;
     };
-  }, [step, uid]);
+  }, [step, uid, atuaComoSupervisor, historicoFiltroUnidade]);
+
+  useEffect(() => {
+    if (step !== "historico") return;
+    if (!atuaComoSupervisor && uid == null) return;
+    let cancel = false;
+    (async () => {
+      setHistoricoUnidadesLoading(true);
+      try {
+        const qs = new URLSearchParams();
+        if (atuaComoSupervisor) {
+          qs.set("perfil", "supervisor");
+        } else {
+          qs.set("perfil", "gerente");
+          qs.set("uid", String(uid));
+        }
+        const res = await fetch(`/api/checklist/unidades?${qs}`);
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error ?? "Erro ao carregar lojas.");
+        if (!cancel) setListaUnidadesHistorico(json.unidades ?? []);
+      } catch (e) {
+        if (!cancel) setListaUnidadesHistorico([]);
+      } finally {
+        if (!cancel) setHistoricoUnidadesLoading(false);
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [step, uid, atuaComoSupervisor]);
 
   useEffect(() => {
     let cancel = false;
@@ -383,10 +653,6 @@ function ChecklistView({ userPerfil, uid }) {
 
   const maxGeral = secoesLista.reduce((acc, s) => acc + (s.pontos_max ?? 0), 0);
 
-  const atuaComoSupervisor =
-    userPerfil === "supervisor" ||
-    (userPerfil === "admin" && adminModoChecklist === "supervisor");
-
   const voltarAoInicioChecklist = () => {
     setStep("identificacao");
     setSecaoAtual(0);
@@ -425,16 +691,43 @@ function ChecklistView({ userPerfil, uid }) {
     setStep("secao");
   }
 
+  const turnoModeloHistorico =
+    historicoDetalhe != null
+      ? turnoModeloPorTipoAvaliador(historicoDetalhe.tipo_avaliador)
+      : null;
+  const historicoSecoesParaMontagem =
+    turnoModeloHistorico == null
+      ? []
+      : (historicoSecoes ?? []).filter(
+          (sc) => (sc.turno ?? "manha") === turnoModeloHistorico
+        );
   const porSecaoHistorico =
-    historicoDetalhe && historicoSecoes.length
-      ? montarPorSecao(historicoSecoes, historicoDetalhe.respostas)
+    historicoDetalhe && historicoSecoesParaMontagem.length
+      ? montarPorSecao(historicoSecoesParaMontagem, historicoDetalhe.respostas)
       : [];
 
+  const unidadesHistoricoPorGrupo = agruparUnidadesPorGrupo(listaUnidadesHistorico);
+
+  const historicoBackPill = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    minHeight: 44,
+    padding: "0 14px 0 10px",
+    borderRadius: 12,
+    border: "1px solid var(--border)",
+    background: "var(--card-bg)",
+    color: "var(--text-primary)",
+    fontSize: 16,
+    fontWeight: 600,
+    cursor: "pointer",
+    boxShadow: "0 1px 3px rgba(15,23,42,0.08)",
+  };
+
   if (step === "historico") {
-    const pctGlob =
-      historicoDetalhe && historicoSecoes.length
-        ? Math.round(Number(historicoDetalhe.percentual ?? 0))
-        : 0;
+    const pctGlob = historicoDetalhe
+      ? Math.round(Number(historicoDetalhe.percentual ?? 0))
+      : 0;
 
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", padding: "24px 16px" }}>
@@ -442,22 +735,17 @@ function ChecklistView({ userPerfil, uid }) {
           <>
             <button
               type="button"
+              aria-label="Voltar"
               onClick={() => {
                 setHistoricoDetalhe(null);
                 setStep("identificacao");
               }}
-              style={{
-                marginBottom: 16,
-                padding: "8px 4px",
-                border: "none",
-                background: "none",
-                color: "var(--accent)",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
+              style={{ ...historicoBackPill, marginBottom: 16 }}
             >
-              ← Voltar
+              <span style={{ fontSize: 26, lineHeight: 1, fontWeight: 400 }} aria-hidden>
+                ‹
+              </span>
+              Voltar
             </button>
             <h1
               style={{
@@ -469,9 +757,53 @@ function ChecklistView({ userPerfil, uid }) {
             >
               Minhas avaliações
             </h1>
-            <p style={{ margin: "0 0 20px", fontSize: 14, color: "var(--text-secondary)" }}>
+            <p style={{ margin: "0 0 16px", fontSize: 14, color: "var(--text-secondary)" }}>
               Avaliações concluídas, da mais recente à mais antiga.
             </p>
+            <div style={{ marginBottom: 20 }}>
+              <label
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "var(--text-secondary)",
+                  display: "block",
+                  marginBottom: 8,
+                }}
+              >
+                Loja
+              </label>
+              {historicoUnidadesLoading ? (
+                <p style={{ margin: 0, fontSize: 14, color: "var(--text-secondary)" }}>
+                  A carregar lojas…
+                </p>
+              ) : (
+                <select
+                  value={historicoFiltroUnidade}
+                  onChange={(e) => setHistoricoFiltroUnidade(e.target.value)}
+                  style={{
+                    width: "100%",
+                    borderRadius: 12,
+                    border: "1px solid var(--border)",
+                    padding: "12px 14px",
+                    fontSize: 15,
+                    background: "var(--card-bg)",
+                    color: "var(--text-primary)",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <option value="">Todas as lojas</option>
+                  {unidadesHistoricoPorGrupo.map(([grupo, lista]) => (
+                    <optgroup key={grupo === "" ? "_sem_grupo_h" : grupo} label={grupo === "" ? "—" : grupo}>
+                      {lista.map((u) => (
+                        <option key={`hist:${grupo}:${u.codigo}`} value={u.nome}>
+                          {u.nome}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              )}
+            </div>
             {historicoLoading && (
               <p style={{ margin: 0, fontSize: 14, color: "var(--text-secondary)" }}>
                 A carregar…
@@ -535,6 +867,30 @@ function ChecklistView({ userPerfil, uid }) {
                         >
                           {av.unidade}
                         </div>
+                        {atuaComoSupervisor && (
+                          <span
+                            style={{
+                              display: "inline-block",
+                              marginTop: 6,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: "3px 8px",
+                              borderRadius: 6,
+                              background:
+                                av.tipo_avaliador === "supervisor"
+                                  ? "#e0f2fe"
+                                  : "var(--accent-soft)",
+                              color:
+                                av.tipo_avaliador === "supervisor"
+                                  ? "#0369a1"
+                                  : "var(--accent)",
+                            }}
+                          >
+                            {av.tipo_avaliador === "supervisor"
+                              ? "Supervisão"
+                              : "Gerente"}
+                          </span>
+                        )}
                       </div>
                       <div
                         style={{
@@ -573,48 +929,68 @@ function ChecklistView({ userPerfil, uid }) {
             <div
               style={{
                 display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                marginBottom: 16,
                 alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                marginBottom: 16,
               }}
             >
               <button
                 type="button"
-                title="Voltar para a lista"
+                aria-label="Voltar para a lista"
                 onClick={() => setHistoricoDetalhe(null)}
-                style={{
-                  padding: "8px 4px",
-                  border: "none",
-                  background: "none",
-                  color: "var(--accent)",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
+                style={{ ...historicoBackPill, flexShrink: 0 }}
               >
-                ← Voltar
+                <span style={{ fontSize: 26, lineHeight: 1, fontWeight: 400 }} aria-hidden>
+                  ‹
+                </span>
+                Voltar
               </button>
               <button
                 type="button"
-                title="Voltar para o início"
                 onClick={() => {
                   setHistoricoDetalhe(null);
                   setStep("identificacao");
                 }}
                 style={{
-                  padding: "8px 4px",
+                  flexShrink: 0,
+                  minHeight: 44,
+                  padding: "0 12px",
                   border: "none",
-                  background: "none",
+                  background: "transparent",
                   color: "var(--accent)",
-                  fontSize: 14,
-                  fontWeight: 600,
+                  fontSize: 15,
+                  fontWeight: 700,
                   cursor: "pointer",
                 }}
               >
-                ← Voltar
+                Início
               </button>
             </div>
+            {atuaComoSupervisor && (
+              <div style={{ marginBottom: 12 }}>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    padding: "4px 10px",
+                    borderRadius: 8,
+                    background:
+                      historicoDetalhe.tipo_avaliador === "supervisor"
+                        ? "#e0f2fe"
+                        : "var(--accent-soft)",
+                    color:
+                      historicoDetalhe.tipo_avaliador === "supervisor"
+                        ? "#0369a1"
+                        : "var(--accent)",
+                  }}
+                >
+                  {historicoDetalhe.tipo_avaliador === "supervisor"
+                    ? "Supervisão"
+                    : "Gerente"}
+                </span>
+              </div>
+            )}
             <div
               style={{
                 background: "var(--card-bg)",
@@ -663,53 +1039,11 @@ function ChecklistView({ userPerfil, uid }) {
               </div>
             </div>
 
-            <div
-              style={{
-                background: "var(--card-bg)",
-                border: "1px solid var(--border)",
-                borderRadius: 14,
-                padding: 20,
-              }}
-            >
-              <h3 style={{ margin: "0 0 16px", fontSize: 15, color: "var(--text-primary)" }}>
-                Resultado por seção
-              </h3>
-              {porSecaoHistorico.map((s) => (
-                <div key={s.secao_id} style={{ marginBottom: 16 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      marginBottom: 6,
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 14,
-                        color: "var(--text-primary)",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {s.titulo}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 14,
-                        fontWeight: 700,
-                        color: getScoreColor(s.percentual),
-                      }}
-                    >
-                      {s.percentual}%
-                    </span>
-                  </div>
-                  <ProgressBar
-                    value={s.percentual}
-                    max={100}
-                    color={getScoreColor(s.percentual)}
-                  />
-                </div>
-              ))}
-            </div>
+            <ResultadoPorSecaoExpandivel
+              linhasPorSecao={porSecaoHistorico}
+              respostas={historicoDetalhe.respostas}
+              avaliacaoKey={historicoDetalhe.id}
+            />
           </>
         )}
       </div>
@@ -889,11 +1223,12 @@ function ChecklistView({ userPerfil, uid }) {
           </button>
         </form>
 
-        {uid != null && (
+        {podeVerHistoricoAvaliacoes && (
           <button
             type="button"
             onClick={() => {
               setHistoricoDetalhe(null);
+              setHistoricoFiltroUnidade("");
               setStep("historico");
             }}
             style={{
@@ -1037,6 +1372,155 @@ function ChecklistView({ userPerfil, uid }) {
   if (step === "concluido") {
     const pct = maxGeral > 0 ? Math.round((totalGeral / maxGeral) * 100) : 0;
     const cor = getScoreColor(pct);
+    const secoesMontarConclusao = (secoesLista ?? []).map((s) => ({
+      id: s.id,
+      titulo: s.titulo,
+      pontos_max: Number(s.pontos_max) || 0,
+    }));
+    const porSecaoConclusao = montarPorSecao(
+      secoesMontarConclusao,
+      respostasFormParaMontarPorSecao(secoesLista, respostas)
+    );
+
+    if (conclusaoVerRespostasDetalhe) {
+      return (
+        <div style={{ maxWidth: 480, margin: "0 auto", padding: "24px 16px" }}>
+          <button
+            type="button"
+            onClick={() => setConclusaoVerRespostasDetalhe(false)}
+            style={{
+              marginBottom: 16,
+              padding: "8px 4px",
+              border: "none",
+              background: "none",
+              color: "var(--accent)",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+              display: "block",
+              textAlign: "left",
+            }}
+          >
+            ← Voltar
+          </button>
+          <div
+            style={{
+              background: "var(--card-bg)",
+              border: "1px solid var(--border)",
+              borderRadius: 14,
+              padding: 20,
+              marginBottom: 16,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+              }}
+            >
+              <div>
+                <h3 style={{ margin: "0 0 4px", fontSize: 18, color: "var(--text-primary)" }}>
+                  {unidadeNome}
+                </h3>
+                <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
+                  {avaliador} · {textoTurnoLista(turnoEscolhido)}
+                </p>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div
+                  style={{
+                    fontSize: 28,
+                    fontWeight: 800,
+                    color: getScoreColor(pct),
+                  }}
+                >
+                  {pct}%
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  {maxGeral > 0 ? `${totalGeral}/${maxGeral} pts` : "—"}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: "var(--card-bg)",
+              border: "1px solid var(--border)",
+              borderRadius: 14,
+              padding: 20,
+              marginBottom: 24,
+            }}
+          >
+            <h3 style={{ margin: "0 0 16px", fontSize: 15, color: "var(--text-primary)" }}>
+              Resultado por seção
+            </h3>
+            {porSecaoConclusao.map((s) => (
+              <div key={s.secao_id} style={{ marginBottom: 16 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 14,
+                      color: "var(--text-primary)",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {s.titulo}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: getScoreColor(s.percentual),
+                    }}
+                  >
+                    {s.percentual}%
+                  </span>
+                </div>
+                <ProgressBar
+                  value={s.percentual}
+                  max={100}
+                  color={getScoreColor(s.percentual)}
+                />
+              </div>
+            ))}
+          </div>
+
+          {podeVerHistoricoAvaliacoes && (
+            <button
+              type="button"
+              onClick={() => {
+                setConclusaoVerRespostasDetalhe(false);
+                setHistoricoDetalhe(null);
+                setHistoricoFiltroUnidade("");
+                setStep("historico");
+              }}
+              style={{
+                width: "100%",
+                padding: 14,
+                borderRadius: 10,
+                border: "none",
+                background: "var(--accent)",
+                color: "#fff",
+                fontSize: 15,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Ver todas as avaliações
+            </button>
+          )}
+        </div>
+      );
+    }
+
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", padding: "32px 16px", textAlign: "center" }}>
         <div style={{ width: 80, height: 80, borderRadius: "50%", background: getScoreBg(pct), border: `3px solid ${cor}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: 32, fontWeight: 800, color: cor }}>
@@ -1062,6 +1546,25 @@ function ChecklistView({ userPerfil, uid }) {
           })}
         </div>
 
+        <button
+          type="button"
+          onClick={() => setConclusaoVerRespostasDetalhe(true)}
+          style={{
+            width: "100%",
+            padding: 14,
+            borderRadius: 10,
+            border: "1.5px solid var(--border)",
+            background: "var(--card-bg)",
+            color: "var(--text-primary)",
+            fontSize: 15,
+            fontWeight: 700,
+            cursor: "pointer",
+            marginBottom: 12,
+          }}
+        >
+          Ver perguntas e respostas
+        </button>
+
         <button type="button" onClick={() => {
           setStep("identificacao");
           setRespostas({});
@@ -1072,6 +1575,7 @@ function ChecklistView({ userPerfil, uid }) {
           setSecoesLista([]);
           setAvaliacaoId(null);
           setSyncError(null);
+          setConclusaoVerRespostasDetalhe(false);
         }}
           style={{ width: "100%", padding: 14, borderRadius: 10, border: "1.5px solid var(--accent)", background: "transparent", color: "var(--accent)", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
           Nova avaliação
@@ -1693,49 +2197,11 @@ function DashboardView({ userPerfil = "gerente" }) {
                 </div>
               </div>
 
-              <div
-                style={{
-                  background: "var(--card-bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 14,
-                  padding: 20,
-                }}
-              >
-                <h3 style={{ margin: "0 0 16px", fontSize: 15, color: "var(--text-primary)" }}>
-                  Resultado por seção
-                </h3>
-                {porSecaoDisplay.map((s) => (
-                  <div key={s.secao_id} style={{ marginBottom: 16 }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        marginBottom: 6,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 14,
-                          color: "var(--text-primary)",
-                          fontWeight: 500,
-                        }}
-                      >
-                        {s.titulo}
-                      </span>
-                      <span
-                        style={{ fontSize: 14, fontWeight: 700, color: getScoreColor(s.percentual) }}
-                      >
-                        {s.percentual}%
-                      </span>
-                    </div>
-                    <ProgressBar
-                      value={s.percentual}
-                      max={100}
-                      color={getScoreColor(s.percentual)}
-                    />
-                  </div>
-                ))}
-              </div>
+              <ResultadoPorSecaoExpandivel
+                linhasPorSecao={porSecaoDisplay}
+                respostas={displayAv.respostas}
+                avaliacaoKey={displayAv.id}
+              />
             </div>
           )}
         </>
