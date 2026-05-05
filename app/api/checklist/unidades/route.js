@@ -1,12 +1,31 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase-service";
-import { loadUnidades } from "@/lib/checklist-queries";
 
-export async function GET() {
+export async function GET(request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const perfil = searchParams.get("perfil");
+    const uid = searchParams.get("uid");
+
     const supabase = createServiceRoleClient();
-    const unidades = await loadUnidades(supabase);
-    return NextResponse.json({ unidades });
+
+    let q = supabase
+      .from("unidades")
+      .select("codigo, nome, grupo")
+      .order("grupo", { ascending: true })
+      .order("nome", { ascending: true });
+
+    if (perfil === "gerente" && uid != null) {
+      q = q.eq("gerente_uid", uid);
+    }
+
+    const { data, error } = await q;
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    return NextResponse.json({ unidades: data ?? [] });
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: e.message ?? "Erro ao carregar unidades." }, { status: 500 });

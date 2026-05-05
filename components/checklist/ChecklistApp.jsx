@@ -1,11 +1,19 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { perguntaIdPorCodigo } from "@/lib/perguntaDbIds";
-import { fetchUnidades, fetchSecoes } from "@/lib/supabase";
+import { perguntaEstaAtiva } from "@/lib/checklist-queries";
+import { fetchSecoes } from "@/lib/supabase";
 
 const UUID_PERGUNTA = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 
 const TEXTO_SUBTURNO = { manha: "Turno da manhã", tarde: "Turno da tarde" };
+
+const TEXTO_TURNO_LISTA = { manha: "Manhã", tarde: "Tarde", noite: "Noite" };
+
+function textoTurnoLista(t) {
+  if (t == null || t === "") return "—";
+  return TEXTO_TURNO_LISTA[t] ?? String(t);
+}
 
 /** Temporário: voltar a `true` para mostrar botão + preview de foto nas perguntas. */
 const EXIBIR_OPCAO_FOTO_NAS_PERGUNTAS = false;
@@ -35,7 +43,7 @@ function normalizarSecoesDaApi(rows) {
   const lista = rows ?? [];
   return lista.map((s) => {
     const perguntasRaw = Array.isArray(s.perguntas) ? s.perguntas : [];
-    const perguntas = perguntasRaw.filter((pr) => pr.ativo !== false).map(normalizarPerguntaParaUi);
+    const perguntas = perguntasRaw.filter(perguntaEstaAtiva).map(normalizarPerguntaParaUi);
     return { ...s, perguntas };
   });
 }
@@ -275,8 +283,8 @@ async function persistirRespostasDaSecao(avaliacao_id, sec, respostas) {
 }
 
 // ─── VIEW: CHECKLIST (formulário) ───────────────────────────────────────────
-function ChecklistView({ userPerfil }) {
-  const [step, setStep] = useState("identificacao"); // identificacao | secao | concluido
+function ChecklistView({ userPerfil, uid }) {
+  const [step, setStep] = useState("identificacao"); // identificacao | historico | secao | concluido
   const [secaoAtual, setSecaoAtual] = useState(0);
   const [avaliador, setAvaliador] = useState("");
   const [unidadeNome, setUnidadeNome] = useState("");
@@ -294,6 +302,37 @@ function ChecklistView({ userPerfil }) {
   const [modalSairOpen, setModalSairOpen] = useState(false);
   const [modalContinuar, setModalContinuar] = useState({ open: false, avaliacao: null });
   const [toastAviso, setToastAviso] = useState("");
+  const [historicoLista, setHistoricoLista] = useState([]);
+  const [historicoSecoes, setHistoricoSecoes] = useState([]);
+  const [historicoLoading, setHistoricoLoading] = useState(false);
+  const [historicoError, setHistoricoError] = useState(null);
+  const [historicoDetalhe, setHistoricoDetalhe] = useState(null);
+
+  useEffect(() => {
+    if (step !== "historico" || uid == null) return;
+    let cancel = false;
+    (async () => {
+      setHistoricoLoading(true);
+      setHistoricoError(null);
+      try {
+        const res = await fetch(
+          `/api/checklist/avaliacoes/historico?uid=${encodeURIComponent(String(uid))}`
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || "Falha ao carregar histórico.");
+        if (cancel) return;
+        setHistoricoLista(json.avaliacoes ?? []);
+        setHistoricoSecoes(json.secoes ?? []);
+      } catch (e) {
+        if (!cancel) setHistoricoError(e.message ?? "Erro ao carregar histórico.");
+      } finally {
+        if (!cancel) setHistoricoLoading(false);
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [step, uid]);
 
   useEffect(() => {
     let cancel = false;
@@ -301,7 +340,12 @@ function ChecklistView({ userPerfil }) {
       setUnidadesErro(null);
       setUnidadesLoading(true);
       try {
-        const rows = await fetchUnidades();
+        const qs = new URLSearchParams({ perfil: userPerfil });
+        if (uid != null) qs.set("uid", String(uid));
+        const res = await fetch(`/api/checklist/unidades?${qs}`);
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error ?? "Erro ao carregar unidades.");
+        const rows = json.unidades ?? [];
         if (!cancel) setListaUnidades(rows);
       } catch (e) {
         if (!cancel) setUnidadesErro(e.message ?? "Erro ao carregar unidades.");
@@ -312,7 +356,7 @@ function ChecklistView({ userPerfil }) {
     return () => {
       cancel = true;
     };
-  }, []);
+  }, [userPerfil, uid]);
 
   const unidadesPorGrupo = agruparUnidadesPorGrupo(listaUnidades);
 
@@ -354,7 +398,7 @@ function ChecklistView({ userPerfil }) {
   };
 
   async function iniciarNovaAvaliacao() {
-    const turnoParaBusca = atuaComoSupervisor ? "tarde" : turnoEscolhido;
+    const turnoParaBusca = atuaComoSupervisor ? "tarde" : "manha";
     const rawSecoes = await fetchSecoes(turnoParaBusca);
     const norm = normalizarSecoesDaApi(rawSecoes);
     if (!norm.length) {
@@ -368,6 +412,7 @@ function ChecklistView({ userPerfil }) {
         unidade: unidadeNome.trim(),
         turno: turnoEscolhido,
         tipo_avaliador: atuaComoSupervisor ? "supervisor" : "gerente",
+        uid: uid ?? null,
       }),
     });
     const json = await res.json().catch(() => ({}));
@@ -378,6 +423,297 @@ function ChecklistView({ userPerfil }) {
     setSecaoAtual(0);
     setToastAviso("");
     setStep("secao");
+  }
+
+  const porSecaoHistorico =
+    historicoDetalhe && historicoSecoes.length
+      ? montarPorSecao(historicoSecoes, historicoDetalhe.respostas)
+      : [];
+
+  if (step === "historico") {
+    const pctGlob =
+      historicoDetalhe && historicoSecoes.length
+        ? Math.round(Number(historicoDetalhe.percentual ?? 0))
+        : 0;
+
+    return (
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "24px 16px" }}>
+        {!historicoDetalhe && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setHistoricoDetalhe(null);
+                setStep("identificacao");
+              }}
+              style={{
+                marginBottom: 16,
+                padding: "8px 4px",
+                border: "none",
+                background: "none",
+                color: "var(--accent)",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ← Voltar
+            </button>
+            <h1
+              style={{
+                margin: "0 0 8px",
+                fontSize: 20,
+                fontWeight: 700,
+                color: "var(--text-primary)",
+              }}
+            >
+              Minhas avaliações
+            </h1>
+            <p style={{ margin: "0 0 20px", fontSize: 14, color: "var(--text-secondary)" }}>
+              Avaliações concluídas, da mais recente à mais antiga.
+            </p>
+            {historicoLoading && (
+              <p style={{ margin: 0, fontSize: 14, color: "var(--text-secondary)" }}>
+                A carregar…
+              </p>
+            )}
+            {historicoError && (
+              <p style={{ margin: "0 0 16px", fontSize: 14, color: "#b91c1c" }}>
+                {historicoError}
+              </p>
+            )}
+            {!historicoLoading && !historicoError && historicoLista.length === 0 && (
+              <p style={{ margin: 0, fontSize: 14, color: "var(--text-secondary)" }}>
+                Sem avaliações concluídas.
+              </p>
+            )}
+            {!historicoLoading && !historicoError && historicoLista.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {historicoLista.map((av) => (
+                  <button
+                    type="button"
+                    key={av.id}
+                    onClick={() => setHistoricoDetalhe(av)}
+                    style={{
+                      background: "var(--card-bg)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 14,
+                      padding: "16px",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      width: "100%",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        marginBottom: 8,
+                        gap: 12,
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: "var(--text-secondary)",
+                            marginBottom: 4,
+                          }}
+                        >
+                          {formatDate(av.checkout_em || av.criado_em)} ·{" "}
+                          <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+                            {textoTurnoLista(av.turno)}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 15,
+                            fontWeight: 700,
+                            color: "var(--text-primary)",
+                          }}
+                        >
+                          {av.unidade}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          background: getScoreBg(av.percentual),
+                          border: `1.5px solid ${getScoreColor(av.percentual)}`,
+                          borderRadius: 8,
+                          padding: "6px 12px",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 17,
+                            fontWeight: 800,
+                            color: getScoreColor(av.percentual),
+                          }}
+                        >
+                          {Math.round(Number(av.percentual || 0))}%
+                        </span>
+                      </div>
+                    </div>
+                    <ProgressBar
+                      value={Number(av.percentual || 0)}
+                      max={100}
+                      color={getScoreColor(av.percentual)}
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {historicoDetalhe && (
+          <>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                marginBottom: 16,
+                alignItems: "center",
+              }}
+            >
+              <button
+                type="button"
+                title="Voltar para a lista"
+                onClick={() => setHistoricoDetalhe(null)}
+                style={{
+                  padding: "8px 4px",
+                  border: "none",
+                  background: "none",
+                  color: "var(--accent)",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                ← Voltar
+              </button>
+              <button
+                type="button"
+                title="Voltar para o início"
+                onClick={() => {
+                  setHistoricoDetalhe(null);
+                  setStep("identificacao");
+                }}
+                style={{
+                  padding: "8px 4px",
+                  border: "none",
+                  background: "none",
+                  color: "var(--accent)",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                ← Voltar
+              </button>
+            </div>
+            <div
+              style={{
+                background: "var(--card-bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 14,
+                padding: 20,
+                marginBottom: 16,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                }}
+              >
+                <div>
+                  <h3
+                    style={{ margin: "0 0 4px", fontSize: 18, color: "var(--text-primary)" }}
+                  >
+                    {historicoDetalhe.unidade}
+                  </h3>
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
+                    {historicoDetalhe.avaliador_nome} ·{" "}
+                    {formatDate(historicoDetalhe.checkout_em || historicoDetalhe.criado_em)} ·{" "}
+                    {textoTurnoLista(historicoDetalhe.turno)}
+                  </p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div
+                    style={{
+                      fontSize: 28,
+                      fontWeight: 800,
+                      color: getScoreColor(pctGlob),
+                    }}
+                  >
+                    {pctGlob}%
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                    {historicoDetalhe.nota_total != null &&
+                    historicoDetalhe.nota_maxima != null
+                      ? `${historicoDetalhe.nota_total}/${historicoDetalhe.nota_maxima} pts`
+                      : "—"}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: "var(--card-bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 14,
+                padding: 20,
+              }}
+            >
+              <h3 style={{ margin: "0 0 16px", fontSize: 15, color: "var(--text-primary)" }}>
+                Resultado por seção
+              </h3>
+              {porSecaoHistorico.map((s) => (
+                <div key={s.secao_id} style={{ marginBottom: 16 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      marginBottom: 6,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 14,
+                        color: "var(--text-primary)",
+                        fontWeight: 500,
+                      }}
+                    >
+                      {s.titulo}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: getScoreColor(s.percentual),
+                      }}
+                    >
+                      {s.percentual}%
+                    </span>
+                  </div>
+                  <ProgressBar
+                    value={s.percentual}
+                    max={100}
+                    color={getScoreColor(s.percentual)}
+                  />
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    );
   }
 
   if (step === "identificacao") {
@@ -410,7 +746,7 @@ function ChecklistView({ userPerfil }) {
             <div style={{ display: "flex", gap: 8 }}>
               {[
                 { val: "supervisor", label: "Supervisão" },
-                { val: "gerente", label: "Encarregado" },
+                { val: "gerente", label: "Gerente" },
               ].map(({ val, label }) => (
                 <button
                   key={val}
@@ -441,7 +777,7 @@ function ChecklistView({ userPerfil }) {
           </div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>Avaliação de Loja</h1>
           <p style={{ margin: "4px 0 0", fontSize: 14, color: "var(--text-secondary)" }}>
-            {TEXTO_SUBTURNO[turnoEscolhido]} — {atuaComoSupervisor ? "Supervisão" : "Encarregado"}
+            {TEXTO_SUBTURNO[turnoEscolhido]} — {atuaComoSupervisor ? "Supervisão" : "Gerente"}
           </p>
         </div>
 
@@ -553,6 +889,30 @@ function ChecklistView({ userPerfil }) {
           </button>
         </form>
 
+        {uid != null && (
+          <button
+            type="button"
+            onClick={() => {
+              setHistoricoDetalhe(null);
+              setStep("historico");
+            }}
+            style={{
+              width: "100%",
+              marginTop: 12,
+              padding: "12px",
+              borderRadius: 10,
+              border: "1.5px solid var(--accent)",
+              background: "transparent",
+              color: "var(--accent)",
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Minhas avaliações
+          </button>
+        )}
+
         {modalContinuar.open && modalContinuar.avaliacao && (
           <div
             role="dialog"
@@ -597,8 +957,7 @@ function ChecklistView({ userPerfil }) {
                     setSyncError(null);
                     try {
                       const tipo = av.tipo_avaliador ?? "gerente";
-                      const turnoBusca =
-                        tipo === "supervisor" ? "tarde" : av.turno || "manha";
+                      const turnoBusca = tipo === "supervisor" ? "tarde" : "manha";
                       const rawSecoes = await fetchSecoes(turnoBusca);
                       const norm = normalizarSecoesDaApi(rawSecoes);
                       if (!norm.length) {
@@ -1386,7 +1745,7 @@ function DashboardView({ userPerfil = "gerente" }) {
 }
 
 // ─── APP PRINCIPAL ───────────────────────────────────────────────────────────
-export default function ChecklistApp({ userPerfil = "supervisor" }) {
+export default function ChecklistApp({ userPerfil = "supervisor", uid }) {
   const [aba, setAba] = useState("checklist");
   const podeVerAnalise = userPerfil === "supervisor" || userPerfil === "admin";
 
@@ -1422,7 +1781,7 @@ export default function ChecklistApp({ userPerfil = "supervisor" }) {
       </div>
 
       {aba === "checklist" ? (
-        <ChecklistView userPerfil={userPerfil} />
+        <ChecklistView userPerfil={userPerfil} uid={uid} />
       ) : (
         <DashboardView userPerfil={userPerfil} />
       )}

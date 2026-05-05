@@ -5,6 +5,10 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const { avaliador_nome, unidade } = body;
+    const uid =
+      body.uid != null && String(body.uid).trim() !== ""
+        ? String(body.uid).trim()
+        : null;
     const turnosValidos = ["manha", "tarde", "noite"];
     const turno = turnosValidos.includes(body.turno) ? body.turno : null;
     if (!avaliador_nome?.trim() || !unidade?.trim()) {
@@ -21,7 +25,7 @@ export async function POST(request) {
     const { data, error } = await supabase
       .from("avaliacoes")
       .insert({
-        usuario_id: nome,
+        usuario_id: uid ?? nome,
         avaliador_nome: nome,
         unidade: unidade.trim(),
         turno,
