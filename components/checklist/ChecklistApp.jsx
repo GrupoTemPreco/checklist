@@ -2,8 +2,9 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { perguntaIdPorCodigo } from "@/lib/perguntaDbIds";
 import { perguntaEstaAtiva } from "@/lib/checklist-queries";
-import { turnoModeloPorTipoAvaliador } from "@/lib/avaliacoes-resposta-map";
-import { fetchSecoes } from "@/lib/supabase";
+import { turnoModeloPorTipoAvaliador, mapRespostasParaApi } from "@/lib/avaliacoes-resposta-map";
+import { fetchSecoes, uploadFoto } from "@/lib/supabase";
+import AdminPerguntasModal from "./AdminPerguntasModal";
 
 const UUID_PERGUNTA = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 
@@ -15,9 +16,6 @@ function textoTurnoLista(t) {
   if (t == null || t === "") return "—";
   return TEXTO_TURNO_LISTA[t] ?? String(t);
 }
-
-/** Temporário: voltar a `true` para mostrar botão + preview de foto nas perguntas. */
-const EXIBIR_OPCAO_FOTO_NAS_PERGUNTAS = false;
 
 function normalizarOpcoes(opcoes) {
   let o = opcoes;
@@ -72,6 +70,36 @@ function perguntasVisiveisNaSecao(secao, respostas) {
     const pai = respostas[p.pergunta_pai_id];
     return pai?.valor === p.resposta_pai_gatilho;
   }) ?? [];
+}
+
+function respostasFormParaDetalheExibicao(secoesLista, estadoRespostas) {
+  const rows = [];
+  for (const sec of secoesLista ?? []) {
+    for (const p of perguntasVisiveisNaSecao(sec, estadoRespostas)) {
+      const r = estadoRespostas[p.id];
+      if (!r || r.valor === undefined || r.valor === "") continue;
+      const foto =
+        r.foto_url && typeof r.foto_url === "string" && !r.foto_url.startsWith("blob:")
+          ? r.foto_url
+          : null;
+      rows.push({
+        pergunta_id: idPerguntaParaGravar(p) || p.id,
+        valor: String(r.valor),
+        pontos_obtidos: r.pontos ?? 0,
+        comentario: r.comentario || null,
+        plano_acao: r.plano_acao || null,
+        foto_url: foto,
+        perguntas: {
+          secao_id: sec.id,
+          texto: p.texto,
+          codigo: p.codigo,
+          tipo: p.tipo,
+          opcoes: p.opcoes,
+        },
+      });
+    }
+  }
+  return mapRespostasParaApi(rows);
 }
 
 /** Respostas do formulário no formato consumido por `montarPorSecao` (como no histórico). */
@@ -146,9 +174,12 @@ function respostasPersistidasParaEstado(rows) {
 }
 
 // ─── COMPONENTE: PERGUNTA ───────────────────────────────────────────────────
-function PerguntaCard({ pergunta, resposta, onChange, perguntasPai }) {
+function PerguntaCard({ pergunta, resposta, onChange, avaliacaoId }) {
   const [showPlanoAcao, setShowPlanoAcao] = useState(false);
-  const fileRef = useRef();
+  const [fotoLoading, setFotoLoading] = useState(false);
+  const [fotoErro, setFotoErro] = useState(null);
+  const fileRef = useRef(null);
+  const previewBlobRef = useRef(null);
 
   const opcaoSelecionada = pergunta.opcoes?.find(o => o.valor === resposta?.valor);
   const precisaPlanoAcao = opcaoSelecionada?.plano_acao;
@@ -157,15 +188,64 @@ function PerguntaCard({ pergunta, resposta, onChange, perguntasPai }) {
     setShowPlanoAcao(!!precisaPlanoAcao);
   }, [precisaPlanoAcao]);
 
-  const handleOpcao = (op) => {
-    onChange({ valor: op.valor, pontos: op.pontos, comentario: resposta?.comentario || "", plano_acao: resposta?.plano_acao || "", foto_url: resposta?.foto_url || "" });
+  const revogarPreviewBlob = () => {
+    if (previewBlobRef.current) {
+      URL.revokeObjectURL(previewBlobRef.current);
+      previewBlobRef.current = null;
+    }
   };
 
-  const handleFoto = (e) => {
-    const file = e.target.files[0];
+  useEffect(() => () => revogarPreviewBlob(), []);
+
+  const handleOpcao = (op) => {
+    onChange({
+      valor: op.valor,
+      pontos: op.pontos,
+      comentario: resposta?.comentario || "",
+      plano_acao: resposta?.plano_acao || "",
+      foto_url: resposta?.foto_url || "",
+    });
+  };
+
+  const handleFoto = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    onChange({ ...resposta, foto_url: url, foto_file: file });
+
+    if (!avaliacaoId) {
+      setFotoErro("Inicie a avaliação antes de enviar fotos.");
+      return;
+    }
+
+    const perguntaId = idPerguntaParaGravar(pergunta);
+    if (!perguntaId) {
+      setFotoErro("Não foi possível identificar esta pergunta.");
+      return;
+    }
+
+    const fotoAnterior =
+      resposta?.foto_url && !String(resposta.foto_url).startsWith("blob:")
+        ? resposta.foto_url
+        : "";
+
+    setFotoErro(null);
+    setFotoLoading(true);
+    revogarPreviewBlob();
+    const localPreview = URL.createObjectURL(file);
+    previewBlobRef.current = localPreview;
+    onChange({ ...resposta, foto_url: localPreview });
+
+    try {
+      const publicUrl = await uploadFoto(file, avaliacaoId, perguntaId);
+      revogarPreviewBlob();
+      onChange({ ...resposta, foto_url: publicUrl });
+    } catch (err) {
+      revogarPreviewBlob();
+      onChange({ ...resposta, foto_url: fotoAnterior });
+      setFotoErro(err?.message ?? "Falha ao enviar a foto.");
+    } finally {
+      setFotoLoading(false);
+    }
   };
 
   return (
@@ -230,19 +310,57 @@ function PerguntaCard({ pergunta, resposta, onChange, perguntasPai }) {
         </div>
       )}
 
+      {pergunta.permite_foto && (
+        <div style={{ marginTop: 10 }}>
+          <button
+            type="button"
+            disabled={fotoLoading}
+            onClick={() => fileRef.current?.click()}
+            style={{
+              fontSize: 13,
+              color: "var(--accent)",
+              background: "var(--accent-soft)",
+              border: "none",
+              borderRadius: 8,
+              padding: "8px 14px",
+              cursor: fotoLoading ? "wait" : "pointer",
+              fontWeight: 600,
+              opacity: fotoLoading ? 0.7 : 1,
+            }}
+          >
+            {fotoLoading ? "A enviar foto…" : "📷 Adicionar foto"}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{ display: "none" }}
+            onChange={handleFoto}
+          />
+          {fotoErro && (
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: "#b91c1c" }}>{fotoErro}</p>
+          )}
+          {resposta?.foto_url && (
+            <img
+              src={resposta.foto_url}
+              alt="Foto da pergunta"
+              style={{
+                display: "block",
+                marginTop: 10,
+                maxWidth: "100%",
+                width: 120,
+                height: 120,
+                objectFit: "cover",
+                borderRadius: 8,
+                border: "1px solid var(--border)",
+              }}
+            />
+          )}
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
-        {EXIBIR_OPCAO_FOTO_NAS_PERGUNTAS && pergunta.permite_foto && (
-          <>
-            <button type="button" onClick={() => fileRef.current?.click()}
-              style={{ fontSize: 12, color: "var(--accent)", background: "var(--accent-soft)", border: "none", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontWeight: 500 }}>
-              + Foto
-            </button>
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleFoto} />
-            {resposta?.foto_url && (
-              <img src={resposta.foto_url} alt="foto" style={{ height: 36, width: 36, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
-            )}
-          </>
-        )}
         {pergunta.tipo !== "texto_livre" && pergunta.tipo !== "nota_livre" && (
           <textarea placeholder="Comentário (opcional)" rows={1}
             value={resposta?.comentario || ""}
@@ -251,6 +369,92 @@ function PerguntaCard({ pergunta, resposta, onChange, perguntasPai }) {
         )}
       </div>
     </div>
+  );
+}
+
+function FotoRespostaVisualizacao({ fotoUrl }) {
+  const [ampliada, setAmpliada] = useState(false);
+  const url = fotoUrl != null ? String(fotoUrl).trim() : "";
+  if (!url || url.startsWith("blob:")) return null;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setAmpliada(true)}
+        style={{
+          display: "block",
+          marginTop: 8,
+          padding: 0,
+          border: "none",
+          background: "none",
+          cursor: "pointer",
+        }}
+        aria-label="Ver foto em tamanho maior"
+      >
+        <img
+          src={url}
+          alt="Foto da resposta"
+          style={{
+            width: 80,
+            height: 80,
+            objectFit: "cover",
+            borderRadius: 8,
+            border: "1px solid var(--border)",
+          }}
+        />
+      </button>
+      {ampliada && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setAmpliada(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 200,
+            background: "rgba(15, 23, 42, 0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setAmpliada(false)}
+            style={{
+              position: "absolute",
+              top: 16,
+              right: 16,
+              border: "none",
+              background: "rgba(255,255,255,0.15)",
+              color: "#fff",
+              fontSize: 28,
+              lineHeight: 1,
+              width: 40,
+              height: 40,
+              borderRadius: 8,
+              cursor: "pointer",
+            }}
+            aria-label="Fechar"
+          >
+            ×
+          </button>
+          <img
+            src={url}
+            alt="Foto da resposta"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "90vh",
+              borderRadius: 8,
+              objectFit: "contain",
+            }}
+          />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -453,6 +657,7 @@ function ResultadoPorSecaoExpandivel({ linhasPorSecao, respostas, avaliacaoKey }
                           Plano de ação: {r.plano_acao}
                         </p>
                       )}
+                      <FotoRespostaVisualizacao fotoUrl={r.foto_url} />
                       <p
                         style={{
                           margin: "6px 0 0",
@@ -1381,6 +1586,10 @@ function ChecklistView({ userPerfil, uid }) {
       secoesMontarConclusao,
       respostasFormParaMontarPorSecao(secoesLista, respostas)
     );
+    const respostasDetalheConclusao = respostasFormParaDetalheExibicao(
+      secoesLista,
+      respostas
+    );
 
     if (conclusaoVerRespostasDetalhe) {
       return (
@@ -1444,54 +1653,11 @@ function ChecklistView({ userPerfil, uid }) {
             </div>
           </div>
 
-          <div
-            style={{
-              background: "var(--card-bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 14,
-              padding: 20,
-              marginBottom: 24,
-            }}
-          >
-            <h3 style={{ margin: "0 0 16px", fontSize: 15, color: "var(--text-primary)" }}>
-              Resultado por seção
-            </h3>
-            {porSecaoConclusao.map((s) => (
-              <div key={s.secao_id} style={{ marginBottom: 16 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginBottom: 6,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 14,
-                      color: "var(--text-primary)",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {s.titulo}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 700,
-                      color: getScoreColor(s.percentual),
-                    }}
-                  >
-                    {s.percentual}%
-                  </span>
-                </div>
-                <ProgressBar
-                  value={s.percentual}
-                  max={100}
-                  color={getScoreColor(s.percentual)}
-                />
-              </div>
-            ))}
-          </div>
+          <ResultadoPorSecaoExpandivel
+            linhasPorSecao={porSecaoConclusao}
+            respostas={respostasDetalheConclusao}
+            avaliacaoKey={avaliacaoId ?? "conclusao"}
+          />
 
           {podeVerHistoricoAvaliacoes && (
             <button
@@ -1650,8 +1816,13 @@ function ChecklistView({ userPerfil, uid }) {
       {/* Perguntas */}
       <div style={{ padding: "16px 16px 100px" }}>
         {perguntasVisiveis.map(p => (
-          <PerguntaCard key={p.id} pergunta={p} resposta={respostas[p.id]}
-            onChange={val => handleResposta(p.id, val)} />
+          <PerguntaCard
+            key={p.id}
+            pergunta={p}
+            resposta={respostas[p.id]}
+            avaliacaoId={avaliacaoId}
+            onChange={(val) => handleResposta(p.id, val)}
+          />
         ))}
       </div>
 
@@ -1849,6 +2020,7 @@ function montarPorSecao(secoes, respostas) {
 
 // ─── VIEW: DASHBOARD ─────────────────────────────────────────────────────────
 function DashboardView({ userPerfil = "gerente" }) {
+  const [perguntasModalOpen, setPerguntasModalOpen] = useState(false);
   const [tipoDashboard, setTipoDashboard] = useState(
     userPerfil === "supervisor" ? "supervisor" : "gerente"
   );
@@ -1916,6 +2088,30 @@ function DashboardView({ userPerfil = "gerente" }) {
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px" }}>
+      {userPerfil === "admin" && (
+        <button
+          type="button"
+          onClick={() => setPerguntasModalOpen(true)}
+          style={{
+            width: "100%",
+            marginBottom: 16,
+            padding: "12px 14px",
+            borderRadius: 10,
+            border: "1.5px solid var(--accent)",
+            background: "var(--accent-soft)",
+            color: "var(--accent)",
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Ver perguntas
+        </button>
+      )}
+      <AdminPerguntasModal
+        open={perguntasModalOpen}
+        onClose={() => setPerguntasModalOpen(false)}
+      />
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         {[
           { val: "gerente", label: "Gerentes" },

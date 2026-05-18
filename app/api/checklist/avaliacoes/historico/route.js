@@ -56,6 +56,7 @@ export async function GET(request) {
           pontos_obtidos,
           comentario,
           plano_acao,
+          foto_url,
           perguntas ( secao_id, texto, codigo, tipo, opcoes )
         )
       `
