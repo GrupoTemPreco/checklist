@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase-service";
 import { loadSecoesPerguntasAdmin } from "@/lib/checklist-queries";
 import {
-  assertPerfilAdmin,
+  assertPerfilGestaoPerguntas,
   turnoModeloFromTipoAvaliador,
   validarPayloadPergunta,
   TURNOS_VALIDOS,
@@ -18,7 +18,7 @@ function erroResponse(e) {
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    assertPerfilAdmin(searchParams.get("perfil")?.trim());
+    assertPerfilGestaoPerguntas(searchParams.get("perfil")?.trim());
 
     const tipo = searchParams.get("tipo_avaliador")?.trim();
     let turno = searchParams.get("turno")?.trim();
@@ -44,7 +44,7 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const body = await request.json();
-    assertPerfilAdmin(body?.perfil?.trim());
+    assertPerfilGestaoPerguntas(body?.perfil?.trim());
 
     const payload = validarPayloadPergunta(body?.pergunta ?? body, { isCreate: true });
     const supabase = createServiceRoleClient();
@@ -90,7 +90,7 @@ export async function POST(request) {
 export async function PATCH(request) {
   try {
     const body = await request.json();
-    assertPerfilAdmin(body?.perfil?.trim());
+    assertPerfilGestaoPerguntas(body?.perfil?.trim());
 
     const payload = validarPayloadPergunta(body?.pergunta ?? body, { isCreate: false });
     const supabase = createServiceRoleClient();

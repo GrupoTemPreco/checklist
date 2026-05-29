@@ -156,6 +156,16 @@ async function eliminarAvaliacaoApi(avaliacao_id) {
   if (!res.ok) throw new Error(json.error || "Falha ao eliminar a avaliação.");
 }
 
+async function atualizarUnidadeAvaliacaoApi(avaliacao_id, unidade) {
+  const res = await fetch("/api/checklist/avaliacao", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ avaliacao_id, unidade: String(unidade).trim() }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || "Falha ao actualizar a loja.");
+}
+
 /** Resposta da API → estado do formulário por `pergunta.id`. */
 function respostasPersistidasParaEstado(rows) {
   const estado = {};
@@ -740,6 +750,15 @@ function ChecklistView({ userPerfil, uid }) {
   const [historicoFiltroUnidade, setHistoricoFiltroUnidade] = useState("");
   const [listaUnidadesHistorico, setListaUnidadesHistorico] = useState([]);
   const [historicoUnidadesLoading, setHistoricoUnidadesLoading] = useState(false);
+  const [historicoAccordionOpen, setHistoricoAccordionOpen] = useState(false);
+  const [historicoRefreshKey, setHistoricoRefreshKey] = useState(0);
+  const [histEditModal, setHistEditModal] = useState(null);
+  const [histEditDraft, setHistEditDraft] = useState("");
+  const [histDelModal, setHistDelModal] = useState(null);
+  const [histUnidList, setHistUnidList] = useState([]);
+  const [histUnidLoading, setHistUnidLoading] = useState(false);
+  const [histOpLoading, setHistOpLoading] = useState(false);
+  const [histOpError, setHistOpError] = useState(null);
 
   const atuaComoSupervisor =
     userPerfil === "supervisor" ||
@@ -778,7 +797,36 @@ function ChecklistView({ userPerfil, uid }) {
     return () => {
       cancel = true;
     };
-  }, [step, uid, atuaComoSupervisor, historicoFiltroUnidade]);
+  }, [step, uid, atuaComoSupervisor, historicoFiltroUnidade, historicoRefreshKey]);
+
+  useEffect(() => {
+    setHistoricoAccordionOpen(false);
+  }, [historicoFiltroUnidade]);
+
+  useEffect(() => {
+    if (!histEditModal) return;
+    let cancel = false;
+    (async () => {
+      setHistUnidLoading(true);
+      try {
+        const res = await fetch("/api/checklist/unidades?perfil=supervisor");
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || "Falha ao carregar lojas.");
+        if (!cancel) setHistUnidList(json.unidades ?? []);
+      } catch {
+        if (!cancel) setHistUnidList([]);
+      } finally {
+        if (!cancel) setHistUnidLoading(false);
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [histEditModal?.id]);
+
+  useEffect(() => {
+    if (histEditModal) setHistEditDraft(histEditModal.unidade ?? "");
+  }, [histEditModal?.id]);
 
   useEffect(() => {
     if (step !== "historico") return;
@@ -929,10 +977,219 @@ function ChecklistView({ userPerfil, uid }) {
     boxShadow: "0 1px 3px rgba(15,23,42,0.08)",
   };
 
+  const podeGestionarHistoricoLista = userPerfil === "admin" || userPerfil === "supervisor";
+
+  function refreshHistoricoLista() {
+    setHistoricoRefreshKey((k) => k + 1);
+  }
+
+  async function historicoOpEliminarConfirm() {
+    if (!histDelModal) return;
+    const id = histDelModal.id;
+    setHistOpError(null);
+    setHistOpLoading(true);
+    try {
+      await eliminarAvaliacaoApi(id);
+      setHistDelModal(null);
+      if (historicoDetalhe?.id === id) setHistoricoDetalhe(null);
+      refreshHistoricoLista();
+    } catch (e) {
+      setHistOpError(e.message ?? "Erro ao eliminar.");
+    } finally {
+      setHistOpLoading(false);
+    }
+  }
+
+  async function historicoOpSalvarUnidade() {
+    if (!histEditModal || !histEditDraft.trim()) return;
+    const id = histEditModal.id;
+    const unidade = histEditDraft.trim();
+    setHistOpError(null);
+    setHistOpLoading(true);
+    try {
+      await atualizarUnidadeAvaliacaoApi(id, unidade);
+      setHistEditModal(null);
+      refreshHistoricoLista();
+      if (historicoDetalhe?.id === id) {
+        setHistoricoDetalhe((d) => (d ? { ...d, unidade } : d));
+      }
+    } catch (e) {
+      setHistOpError(e.message ?? "Erro ao guardar.");
+    } finally {
+      setHistOpLoading(false);
+    }
+  }
+
+  function renderHistoricoLinhaAvaliacao(av) {
+    return (
+      <div
+        key={av.id}
+        style={{
+          display: "flex",
+          gap: 8,
+          alignItems: "stretch",
+          width: "100%",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setHistoricoDetalhe(av)}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: "var(--card-bg)",
+            border: "1px solid var(--border)",
+            borderRadius: 14,
+            padding: "16px",
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              marginBottom: 8,
+              gap: 12,
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "var(--text-secondary)",
+                  marginBottom: 4,
+                }}
+              >
+                {formatDate(av.checkout_em || av.criado_em)} ·{" "}
+                <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+                  {textoTurnoLista(av.turno)}
+                </span>
+              </div>
+              <div
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: "var(--text-primary)",
+                }}
+              >
+                {av.unidade}
+              </div>
+              {atuaComoSupervisor && (
+                <span
+                  style={{
+                    display: "inline-block",
+                    marginTop: 6,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "3px 8px",
+                    borderRadius: 6,
+                    background:
+                      av.tipo_avaliador === "supervisor"
+                        ? "#e0f2fe"
+                        : "var(--accent-soft)",
+                    color:
+                      av.tipo_avaliador === "supervisor"
+                        ? "#0369a1"
+                        : "var(--accent)",
+                  }}
+                >
+                  {av.tipo_avaliador === "supervisor" ? "Supervisão" : "Gerente"}
+                </span>
+              )}
+            </div>
+            <div
+              style={{
+                background: getScoreBg(av.percentual),
+                border: `1.5px solid ${getScoreColor(av.percentual)}`,
+                borderRadius: 8,
+                padding: "6px 12px",
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 17,
+                  fontWeight: 800,
+                  color: getScoreColor(av.percentual),
+                }}
+              >
+                {Math.round(Number(av.percentual || 0))}%
+              </span>
+            </div>
+          </div>
+          <ProgressBar
+            value={Number(av.percentual || 0)}
+            max={100}
+            color={getScoreColor(av.percentual)}
+          />
+        </button>
+        {podeGestionarHistoricoLista ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              gap: 6,
+              flexShrink: 0,
+              padding: "4px 0",
+            }}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setHistOpError(null);
+                setHistEditModal(av);
+                setHistEditDraft(av.unidade ?? "");
+              }}
+              style={{
+                padding: "6px 10px",
+                fontSize: 12,
+                fontWeight: 600,
+                borderRadius: 8,
+                border: "1px solid var(--border)",
+                background: "var(--card-bg)",
+                color: "var(--text-primary)",
+                cursor: "pointer",
+              }}
+            >
+              Editar
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setHistOpError(null);
+                setHistDelModal(av);
+              }}
+              style={{
+                padding: "6px 10px",
+                fontSize: 12,
+                fontWeight: 600,
+                borderRadius: 8,
+                border: "1px solid #fecaca",
+                background: "#fef2f2",
+                color: "#b91c1c",
+                cursor: "pointer",
+              }}
+            >
+              Eliminar
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   if (step === "historico") {
     const pctGlob = historicoDetalhe
       ? Math.round(Number(historicoDetalhe.percentual ?? 0))
       : 0;
+    const histSorted = sortAvaliacoesDesc(historicoLista);
+    const histRecent = histSorted[0] ?? null;
+    const histOlder = histSorted.slice(1);
 
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", padding: "24px 16px" }}>
@@ -1026,104 +1283,52 @@ function ChecklistView({ userPerfil, uid }) {
             )}
             {!historicoLoading && !historicoError && historicoLista.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {historicoLista.map((av) => (
-                  <button
-                    type="button"
-                    key={av.id}
-                    onClick={() => setHistoricoDetalhe(av)}
-                    style={{
-                      background: "var(--card-bg)",
-                      border: "1px solid var(--border)",
-                      borderRadius: 14,
-                      padding: "16px",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      width: "100%",
-                    }}
-                  >
-                    <div
+                {histOpError && !histDelModal && !histEditModal && (
+                  <p style={{ margin: 0, fontSize: 13, color: "#b91c1c" }}>{histOpError}</p>
+                )}
+                {histRecent && renderHistoricoLinhaAvaliacao(histRecent)}
+                {histOlder.length > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => setHistoricoAccordionOpen((o) => !o)}
                       style={{
+                        width: "100%",
                         display: "flex",
+                        alignItems: "center",
                         justifyContent: "space-between",
-                        alignItems: "flex-start",
-                        marginBottom: 8,
-                        gap: 12,
+                        padding: "12px 14px",
+                        borderRadius: 12,
+                        border: "1px solid var(--border)",
+                        background: "var(--card-bg)",
+                        color: "var(--text-primary)",
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        textAlign: "left",
                       }}
                     >
-                      <div>
-                        <div
-                          style={{
-                            fontSize: 13,
-                            color: "var(--text-secondary)",
-                            marginBottom: 4,
-                          }}
-                        >
-                          {formatDate(av.checkout_em || av.criado_em)} ·{" "}
-                          <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-                            {textoTurnoLista(av.turno)}
-                          </span>
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 15,
-                            fontWeight: 700,
-                            color: "var(--text-primary)",
-                          }}
-                        >
-                          {av.unidade}
-                        </div>
-                        {atuaComoSupervisor && (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              marginTop: 6,
-                              fontSize: 11,
-                              fontWeight: 700,
-                              padding: "3px 8px",
-                              borderRadius: 6,
-                              background:
-                                av.tipo_avaliador === "supervisor"
-                                  ? "#e0f2fe"
-                                  : "var(--accent-soft)",
-                              color:
-                                av.tipo_avaliador === "supervisor"
-                                  ? "#0369a1"
-                                  : "var(--accent)",
-                            }}
-                          >
-                            {av.tipo_avaliador === "supervisor"
-                              ? "Supervisão"
-                              : "Gerente"}
-                          </span>
-                        )}
-                      </div>
+                      <span>Avaliações anteriores ({histOlder.length})</span>
+                      <span style={{ color: "var(--text-secondary)", fontWeight: 400 }}>
+                        {historicoAccordionOpen ? "▲" : "▼"}
+                      </span>
+                    </button>
+                    {historicoAccordionOpen && (
                       <div
                         style={{
-                          background: getScoreBg(av.percentual),
-                          border: `1.5px solid ${getScoreColor(av.percentual)}`,
-                          borderRadius: 8,
-                          padding: "6px 12px",
-                          flexShrink: 0,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 10,
+                          marginTop: 10,
+                          paddingLeft: 4,
+                          borderLeft: "2px solid var(--border)",
                         }}
                       >
-                        <span
-                          style={{
-                            fontSize: 17,
-                            fontWeight: 800,
-                            color: getScoreColor(av.percentual),
-                          }}
-                        >
-                          {Math.round(Number(av.percentual || 0))}%
-                        </span>
+                        {histOlder.map((av) => renderHistoricoLinhaAvaliacao(av))}
                       </div>
-                    </div>
-                    <ProgressBar
-                      value={Number(av.percentual || 0)}
-                      max={100}
-                      color={getScoreColor(av.percentual)}
-                    />
-                  </button>
-                ))}
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </>
@@ -1244,12 +1449,274 @@ function ChecklistView({ userPerfil, uid }) {
               </div>
             </div>
 
+            {podeGestionarHistoricoLista && (
+              <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHistOpError(null);
+                    setHistEditModal(historicoDetalhe);
+                    setHistEditDraft(historicoDetalhe.unidade ?? "");
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "1px solid var(--border)",
+                    background: "var(--card-bg)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    color: "var(--text-primary)",
+                  }}
+                >
+                  Editar loja
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHistOpError(null);
+                    setHistDelModal(historicoDetalhe);
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "1px solid #fecaca",
+                    background: "#fef2f2",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    color: "#b91c1c",
+                  }}
+                >
+                  Eliminar avaliação
+                </button>
+              </div>
+            )}
+
             <ResultadoPorSecaoExpandivel
               linhasPorSecao={porSecaoHistorico}
               respostas={historicoDetalhe.respostas}
               avaliacaoKey={historicoDetalhe.id}
             />
           </>
+        )}
+
+        {histDelModal && (
+          <div
+            role="presentation"
+            onClick={() => !histOpLoading && setHistDelModal(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 100,
+              background: "rgba(15, 23, 42, 0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="hist-del-title"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "100%",
+                maxWidth: 380,
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 14,
+                padding: 20,
+                boxShadow: "0 12px 40px rgba(15,23,42,0.14)",
+              }}
+            >
+              <h3
+                id="hist-del-title"
+                style={{ margin: "0 0 8px", fontSize: 17, color: "var(--text-primary)" }}
+              >
+                Eliminar esta avaliação?
+              </h3>
+              <p
+                style={{
+                  margin: "0 0 16px",
+                  fontSize: 14,
+                  color: "var(--text-secondary)",
+                  lineHeight: 1.45,
+                }}
+              >
+                Esta acção não pode ser desfeita.
+              </p>
+              {histOpError && (
+                <p style={{ margin: "0 0 12px", fontSize: 13, color: "#b91c1c" }}>{histOpError}</p>
+              )}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  disabled={histOpLoading}
+                  onClick={() => !histOpLoading && setHistDelModal(null)}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid var(--border)",
+                    background: "transparent",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: histOpLoading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={histOpLoading}
+                  onClick={historicoOpEliminarConfirm}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "#b91c1c",
+                    color: "#fff",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: histOpLoading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {histOpLoading ? "A eliminar…" : "Eliminar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {histEditModal && (
+          <div
+            role="presentation"
+            onClick={() => !histOpLoading && setHistEditModal(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 100,
+              background: "rgba(15, 23, 42, 0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="hist-edit-title"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "100%",
+                maxWidth: 400,
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 14,
+                padding: 20,
+                boxShadow: "0 12px 40px rgba(15,23,42,0.14)",
+              }}
+            >
+              <h3
+                id="hist-edit-title"
+                style={{ margin: "0 0 8px", fontSize: 17, color: "var(--text-primary)" }}
+              >
+                Alterar loja
+              </h3>
+              <p
+                style={{
+                  margin: "0 0 14px",
+                  fontSize: 13,
+                  color: "var(--text-secondary)",
+                  lineHeight: 1.45,
+                }}
+              >
+                Só o nome da loja é alterado; as respostas mantêm-se.
+              </p>
+              {histUnidLoading ? (
+                <p style={{ margin: "0 0 16px", fontSize: 14, color: "var(--text-secondary)" }}>
+                  A carregar lojas…
+                </p>
+              ) : (
+                <label style={{ display: "block", marginBottom: 16 }}>
+                  <span
+                    style={{
+                      display: "block",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "var(--text-secondary)",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Loja
+                  </span>
+                  <select
+                    value={histEditDraft}
+                    onChange={(e) => setHistEditDraft(e.target.value)}
+                    style={{
+                      width: "100%",
+                      borderRadius: 10,
+                      border: "1px solid var(--border)",
+                      padding: "12px 14px",
+                      fontSize: 15,
+                      background: "var(--card-bg)",
+                      color: "var(--text-primary)",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    {histUnidList.map((u) => (
+                      <option key={u.codigo ?? u.nome} value={u.nome}>
+                        {u.nome}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {histOpError && (
+                <p style={{ margin: "0 0 12px", fontSize: 13, color: "#b91c1c" }}>{histOpError}</p>
+              )}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  disabled={histOpLoading}
+                  onClick={() => !histOpLoading && setHistEditModal(null)}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid var(--border)",
+                    background: "transparent",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: histOpLoading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={histOpLoading || histUnidLoading || !histEditDraft.trim()}
+                  onClick={historicoOpSalvarUnidade}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "var(--accent)",
+                    color: "#fff",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor:
+                      histOpLoading || histUnidLoading || !histEditDraft.trim()
+                        ? "not-allowed"
+                        : "pointer",
+                  }}
+                >
+                  {histOpLoading ? "A guardar…" : "Guardar"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     );
@@ -2030,6 +2497,51 @@ function DashboardView({ userPerfil = "gerente" }) {
   const [avaliacoes, setAvaliacoes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [avaliacoesAnterioresAberto, setAvaliacoesAnterioresAberto] = useState(false);
+  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
+  const [modalEditarUnidade, setModalEditarUnidade] = useState(null);
+  const [editUnidadeDraft, setEditUnidadeDraft] = useState("");
+  const [modalEliminarAval, setModalEliminarAval] = useState(null);
+  const [unidadesEdicao, setUnidadesEdicao] = useState([]);
+  const [unidadesEdicaoLoading, setUnidadesEdicaoLoading] = useState(false);
+  const [dashboardAcaoLoading, setDashboardAcaoLoading] = useState(false);
+  const [dashboardAcaoErro, setDashboardAcaoErro] = useState(null);
+
+  const podeGestionarAvaliacoes = userPerfil === "admin" || userPerfil === "supervisor";
+
+  useEffect(() => {
+    setAvaliacoesAnterioresAberto(false);
+    setDetalhe(null);
+  }, [tipoDashboard]);
+
+  useEffect(() => {
+    if (!modalEditarUnidade) return;
+    let cancel = false;
+    (async () => {
+      setUnidadesEdicaoLoading(true);
+      try {
+        const res = await fetch("/api/checklist/unidades?perfil=supervisor");
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || "Falha ao carregar lojas.");
+        if (!cancel) setUnidadesEdicao(json.unidades ?? []);
+      } catch {
+        if (!cancel) setUnidadesEdicao([]);
+      } finally {
+        if (!cancel) setUnidadesEdicaoLoading(false);
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [modalEditarUnidade?.id]);
+
+  useEffect(() => {
+    if (modalEditarUnidade) setEditUnidadeDraft(modalEditarUnidade.unidade ?? "");
+  }, [modalEditarUnidade?.id]);
+
+  useEffect(() => {
+    setAvaliacoesAnterioresAberto(false);
+  }, [filtro]);
 
   useEffect(() => {
     let cancel = false;
@@ -2058,7 +2570,7 @@ function DashboardView({ userPerfil = "gerente" }) {
     return () => {
       cancel = true;
     };
-  }, [tipoDashboard]);
+  }, [tipoDashboard, dashboardRefreshKey]);
 
   const unidades = [...new Set(avaliacoes.map((a) => a.unidade))].sort();
   const avaliacoesFiltradas = sortAvaliacoesDesc(
@@ -2086,9 +2598,183 @@ function DashboardView({ userPerfil = "gerente" }) {
   const numUnidadesKpi =
     filtro === "todas" ? unidades.length : avaliacoesFiltradas.length > 0 ? 1 : 0;
 
+  const recentAv = avaliacoesFiltradas[0] ?? null;
+  const olderAvs = avaliacoesFiltradas.slice(1);
+
+  function refreshDashboard() {
+    setDashboardRefreshKey((k) => k + 1);
+  }
+
+  async function executarEliminarDashboard() {
+    if (!modalEliminarAval) return;
+    const id = modalEliminarAval.id;
+    setDashboardAcaoErro(null);
+    setDashboardAcaoLoading(true);
+    try {
+      await eliminarAvaliacaoApi(id);
+      setModalEliminarAval(null);
+      if (detalhe?.id === id) setDetalhe(null);
+      refreshDashboard();
+    } catch (e) {
+      setDashboardAcaoErro(e.message ?? "Erro ao eliminar.");
+    } finally {
+      setDashboardAcaoLoading(false);
+    }
+  }
+
+  async function executarSalvarUnidadeDashboard() {
+    if (!modalEditarUnidade || !editUnidadeDraft.trim()) return;
+    setDashboardAcaoErro(null);
+    setDashboardAcaoLoading(true);
+    try {
+      await atualizarUnidadeAvaliacaoApi(modalEditarUnidade.id, editUnidadeDraft.trim());
+      setModalEditarUnidade(null);
+      refreshDashboard();
+    } catch (e) {
+      setDashboardAcaoErro(e.message ?? "Erro ao guardar.");
+    } finally {
+      setDashboardAcaoLoading(false);
+    }
+  }
+
+  function linhaAvaliacaoDashboard(av, { isRecent }) {
+    const ativo = displayAv?.id === av.id;
+    return (
+      <div
+        key={av.id}
+        style={{
+          display: "flex",
+          gap: 8,
+          alignItems: "stretch",
+          width: "100%",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            if (isRecent) setDetalhe(null);
+            else setDetalhe(av);
+          }}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: ativo ? "var(--accent-soft)" : "var(--card-bg)",
+            border: `1.5px solid ${ativo ? "var(--accent)" : "var(--border)"}`,
+            borderRadius: 14,
+            padding: "16px",
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              marginBottom: 10,
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: "var(--text-primary)",
+                  marginBottom: 2,
+                }}
+              >
+                {av.unidade}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                {av.avaliador_nome} · {formatDate(av.checkout_em || av.criado_em)}
+              </div>
+            </div>
+            <div
+              style={{
+                background: getScoreBg(av.percentual),
+                border: `1.5px solid ${getScoreColor(av.percentual)}`,
+                borderRadius: 8,
+                padding: "6px 12px",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 18,
+                  fontWeight: 800,
+                  color: getScoreColor(av.percentual),
+                }}
+              >
+                {Math.round(Number(av.percentual || 0))}%
+              </span>
+            </div>
+          </div>
+          <ProgressBar
+            value={Number(av.percentual || 0)}
+            max={100}
+            color={getScoreColor(av.percentual)}
+          />
+        </button>
+        {podeGestionarAvaliacoes ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              gap: 6,
+              flexShrink: 0,
+              padding: "4px 0",
+            }}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setDashboardAcaoErro(null);
+                setModalEditarUnidade(av);
+                setEditUnidadeDraft(av.unidade ?? "");
+              }}
+              style={{
+                padding: "6px 10px",
+                fontSize: 12,
+                fontWeight: 600,
+                borderRadius: 8,
+                border: "1px solid var(--border)",
+                background: "var(--card-bg)",
+                color: "var(--text-primary)",
+                cursor: "pointer",
+              }}
+            >
+              Editar
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setDashboardAcaoErro(null);
+                setModalEliminarAval(av);
+              }}
+              style={{
+                padding: "6px 10px",
+                fontSize: 12,
+                fontWeight: 600,
+                borderRadius: 8,
+                border: "1px solid #fecaca",
+                background: "#fef2f2",
+                color: "#b91c1c",
+                cursor: "pointer",
+              }}
+            >
+              Eliminar
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px" }}>
-      {userPerfil === "admin" && (
+      {userPerfil === "admin" || userPerfil === "supervisor" ? (
         <button
           type="button"
           onClick={() => setPerguntasModalOpen(true)}
@@ -2107,10 +2793,11 @@ function DashboardView({ userPerfil = "gerente" }) {
         >
           Ver perguntas
         </button>
-      )}
+      ) : null}
       <AdminPerguntasModal
         open={perguntasModalOpen}
         onClose={() => setPerguntasModalOpen(false)}
+        userPerfil={userPerfil}
       />
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         {[
@@ -2229,6 +2916,7 @@ function DashboardView({ userPerfil = "gerente" }) {
                 onClick={() => {
                   setFiltro(u);
                   setDetalhe(null);
+                  setAvaliacoesAnterioresAberto(false);
                 }}
                 style={{
                   whiteSpace: "nowrap",
@@ -2249,73 +2937,51 @@ function DashboardView({ userPerfil = "gerente" }) {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
-            {avaliacoesFiltradas.map((av) => {
-              const ativo = displayAv?.id === av.id;
-              return (
+            {dashboardAcaoErro && (
+              <p style={{ margin: 0, fontSize: 13, color: "#b91c1c" }}>{dashboardAcaoErro}</p>
+            )}
+            {olderAvs.length > 0 && (
+              <div style={{ marginTop: 4 }}>
                 <button
                   type="button"
-                  key={av.id}
-                  onClick={() => setDetalhe(av)}
+                  onClick={() => setAvaliacoesAnterioresAberto((o) => !o)}
                   style={{
-                    background: ativo ? "var(--accent-soft)" : "var(--card-bg)",
-                    border: `1.5px solid ${ativo ? "var(--accent)" : "var(--border)"}`,
-                    borderRadius: 14,
-                    padding: "16px",
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    border: "1px solid var(--border)",
+                    background: "var(--card-bg)",
+                    color: "var(--text-primary)",
+                    fontSize: 14,
+                    fontWeight: 600,
                     cursor: "pointer",
                     textAlign: "left",
-                    width: "100%",
                   }}
                 >
+                  <span>Avaliações anteriores ({olderAvs.length})</span>
+                  <span style={{ color: "var(--text-secondary)", fontWeight: 400 }}>
+                    {avaliacoesAnterioresAberto ? "▲" : "▼"}
+                  </span>
+                </button>
+                {avaliacoesAnterioresAberto && (
                   <div
                     style={{
                       display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      marginBottom: 10,
+                      flexDirection: "column",
+                      gap: 10,
+                      marginTop: 10,
+                      paddingLeft: 4,
+                      borderLeft: "2px solid var(--border)",
                     }}
                   >
-                    <div>
-                      <div
-                        style={{
-                          fontSize: 15,
-                          fontWeight: 700,
-                          color: "var(--text-primary)",
-                          marginBottom: 2,
-                        }}
-                      >
-                        {av.unidade}
-                      </div>
-                      <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                        {av.avaliador_nome} · {formatDate(av.checkout_em || av.criado_em)}
-                      </div>
-                    </div>
-                    <div
-                      style={{
-                        background: getScoreBg(av.percentual),
-                        border: `1.5px solid ${getScoreColor(av.percentual)}`,
-                        borderRadius: 8,
-                        padding: "6px 12px",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 18,
-                          fontWeight: 800,
-                          color: getScoreColor(av.percentual),
-                        }}
-                      >
-                        {Math.round(Number(av.percentual || 0))}%
-                      </span>
-                    </div>
+                    {olderAvs.map((av) => linhaAvaliacaoDashboard(av, { isRecent: false }))}
                   </div>
-                  <ProgressBar
-                    value={Number(av.percentual || 0)}
-                    max={100}
-                    color={getScoreColor(av.percentual)}
-                  />
-                </button>
-              );
-            })}
+                )}
+              </div>
+            )}
           </div>
 
           {displayAv && (
@@ -2329,7 +2995,7 @@ function DashboardView({ userPerfil = "gerente" }) {
                 }}
               >
                 <h2 style={{ margin: 0, fontSize: 16, color: "var(--text-primary)" }}>
-                  Detalhe {detalhe ? "" : "(última concluída)"}
+                  Detalhe {detalhe ? " (seleccionada)" : " (última na lista)"}
                 </h2>
                 {detalhe && (
                   <button
@@ -2393,11 +3059,263 @@ function DashboardView({ userPerfil = "gerente" }) {
                 </div>
               </div>
 
+              {podeGestionarAvaliacoes && (
+                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDashboardAcaoErro(null);
+                      setModalEditarUnidade(displayAv);
+                      setEditUnidadeDraft(displayAv.unidade ?? "");
+                    }}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 10,
+                      border: "1px solid var(--border)",
+                      background: "var(--card-bg)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    Editar loja
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDashboardAcaoErro(null);
+                      setModalEliminarAval(displayAv);
+                    }}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 10,
+                      border: "1px solid #fecaca",
+                      background: "#fef2f2",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      color: "#b91c1c",
+                    }}
+                  >
+                    Eliminar avaliação
+                  </button>
+                </div>
+              )}
+
               <ResultadoPorSecaoExpandivel
                 linhasPorSecao={porSecaoDisplay}
                 respostas={displayAv.respostas}
                 avaliacaoKey={displayAv.id}
               />
+            </div>
+          )}
+
+          {modalEliminarAval && (
+            <div
+              role="presentation"
+              onClick={() => !dashboardAcaoLoading && setModalEliminarAval(null)}
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 100,
+                background: "rgba(15, 23, 42, 0.45)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 16,
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="dash-del-title"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  width: "100%",
+                  maxWidth: 380,
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 14,
+                  padding: 20,
+                  boxShadow: "0 12px 40px rgba(15,23,42,0.14)",
+                }}
+              >
+                <h3
+                  id="dash-del-title"
+                  style={{ margin: "0 0 8px", fontSize: 17, color: "var(--text-primary)" }}
+                >
+                  Eliminar esta avaliação?
+                </h3>
+                <p style={{ margin: "0 0 16px", fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                  Esta acção não pode ser desfeita. As respostas desta avaliação deixam de contar nas estatísticas.
+                </p>
+                {dashboardAcaoErro && (
+                  <p style={{ margin: "0 0 12px", fontSize: 13, color: "#b91c1c" }}>{dashboardAcaoErro}</p>
+                )}
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    disabled={dashboardAcaoLoading}
+                    onClick={() => {
+                      if (!dashboardAcaoLoading) setModalEliminarAval(null);
+                    }}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 10,
+                      border: "1px solid var(--border)",
+                      background: "transparent",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: dashboardAcaoLoading ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={dashboardAcaoLoading}
+                    onClick={executarEliminarDashboard}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: "#b91c1c",
+                      color: "#fff",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: dashboardAcaoLoading ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {dashboardAcaoLoading ? "A eliminar…" : "Eliminar"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {modalEditarUnidade && (
+            <div
+              role="presentation"
+              onClick={() => !dashboardAcaoLoading && setModalEditarUnidade(null)}
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 100,
+                background: "rgba(15, 23, 42, 0.45)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 16,
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="dash-edit-title"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  width: "100%",
+                  maxWidth: 400,
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 14,
+                  padding: 20,
+                  boxShadow: "0 12px 40px rgba(15,23,42,0.14)",
+                }}
+              >
+                <h3
+                  id="dash-edit-title"
+                  style={{ margin: "0 0 8px", fontSize: 17, color: "var(--text-primary)" }}
+                >
+                  Alterar loja
+                </h3>
+                <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                  Só o nome da loja é alterado; as respostas e pontuações mantêm-se.
+                </p>
+                {unidadesEdicaoLoading ? (
+                  <p style={{ margin: "0 0 16px", fontSize: 14, color: "var(--text-secondary)" }}>
+                    A carregar lojas…
+                  </p>
+                ) : (
+                  <label style={{ display: "block", marginBottom: 16 }}>
+                    <span
+                      style={{
+                        display: "block",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "var(--text-secondary)",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Loja
+                    </span>
+                    <select
+                      value={editUnidadeDraft}
+                      onChange={(e) => setEditUnidadeDraft(e.target.value)}
+                      style={{
+                        width: "100%",
+                        borderRadius: 10,
+                        border: "1px solid var(--border)",
+                        padding: "12px 14px",
+                        fontSize: 15,
+                        background: "var(--card-bg)",
+                        color: "var(--text-primary)",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      {unidadesEdicao.map((u) => (
+                        <option key={u.codigo ?? u.nome} value={u.nome}>
+                          {u.nome}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {dashboardAcaoErro && (
+                  <p style={{ margin: "0 0 12px", fontSize: 13, color: "#b91c1c" }}>{dashboardAcaoErro}</p>
+                )}
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    disabled={dashboardAcaoLoading}
+                    onClick={() => {
+                      if (!dashboardAcaoLoading) setModalEditarUnidade(null);
+                    }}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 10,
+                      border: "1px solid var(--border)",
+                      background: "transparent",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: dashboardAcaoLoading ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={dashboardAcaoLoading || unidadesEdicaoLoading || !editUnidadeDraft.trim()}
+                    onClick={executarSalvarUnidadeDashboard}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: "var(--accent)",
+                      color: "#fff",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor:
+                        dashboardAcaoLoading || unidadesEdicaoLoading || !editUnidadeDraft.trim()
+                          ? "not-allowed"
+                          : "pointer",
+                    }}
+                  >
+                    {dashboardAcaoLoading ? "A guardar…" : "Guardar"}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </>

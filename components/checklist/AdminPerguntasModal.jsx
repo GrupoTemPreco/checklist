@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   TIPOS_PERGUNTA,
-  TURNOS_VALIDOS,
   perguntaParaForm,
   formVazioNovaPergunta,
   OPCOES_PADRAO_POR_TIPO,
@@ -12,8 +11,8 @@ import {
 import { turnoModeloPorTipoAvaliador } from "@/lib/avaliacoes-resposta-map";
 
 const TIPO_AVALIADOR_OPTS = [
-  { val: "gerente", label: "Gerente (manhã)" },
-  { val: "supervisor", label: "Supervisor (tarde)" },
+  { val: "gerente", label: "Gerente" },
+  { val: "supervisor", label: "Supervisor" },
 ];
 
 const TIPO_LABEL = {
@@ -417,9 +416,9 @@ function PerguntaViewCard({ p }) {
   );
 }
 
-export default function AdminPerguntasModal({ open, onClose }) {
+export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin" }) {
+  const apiPerfil = userPerfil === "supervisor" ? "supervisor" : "admin";
   const [tipoAvaliador, setTipoAvaliador] = useState("gerente");
-  const [turnoExtra, setTurnoExtra] = useState(null);
   const [secoes, setSecoes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -430,7 +429,10 @@ export default function AdminPerguntasModal({ open, onClose }) {
   const [msg, setMsg] = useState("");
   const [secoesAbertas, setSecoesAbertas] = useState(() => new Set());
 
-  const turnoFetch = turnoExtra ?? turnoModeloPorTipoAvaliador(tipoAvaliador);
+  const turnoFetch = useMemo(
+    () => turnoModeloPorTipoAvaliador(tipoAvaliador),
+    [tipoAvaliador]
+  );
 
   const toggleSecao = (secaoId) => {
     const id = String(secaoId);
@@ -448,7 +450,7 @@ export default function AdminPerguntasModal({ open, onClose }) {
     setMsg("");
     try {
       const qs = new URLSearchParams({
-        perfil: "admin",
+        perfil: apiPerfil,
         tipo_avaliador: tipoAvaliador,
         turno: turnoFetch,
       });
@@ -468,7 +470,7 @@ export default function AdminPerguntasModal({ open, onClose }) {
     } finally {
       setLoading(false);
     }
-  }, [tipoAvaliador, turnoFetch]);
+  }, [tipoAvaliador, turnoFetch, apiPerfil]);
 
   useEffect(() => {
     if (!open) return;
@@ -498,7 +500,7 @@ export default function AdminPerguntasModal({ open, onClose }) {
         const res = await fetch("/api/checklist/perguntas", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ perfil: "admin", pergunta: d }),
+          body: JSON.stringify({ perfil: apiPerfil, pergunta: d }),
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json.error || `Falha ao guardar ${d.codigo}.`);
@@ -523,7 +525,7 @@ export default function AdminPerguntasModal({ open, onClose }) {
       const res = await fetch("/api/checklist/perguntas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ perfil: "admin", pergunta: nova }),
+        body: JSON.stringify({ perfil: apiPerfil, pergunta: nova }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || "Falha ao criar pergunta.");
@@ -612,7 +614,6 @@ export default function AdminPerguntasModal({ open, onClose }) {
                 disabled={modo !== "view" && modo !== "add"}
                 onClick={() => {
                   setTipoAvaliador(val);
-                  setTurnoExtra(null);
                 }}
                 style={{
                   flex: "1 1 120px",
@@ -631,33 +632,6 @@ export default function AdminPerguntasModal({ open, onClose }) {
               </button>
             ))}
           </div>
-          {tipoAvaliador === "gerente" && (
-            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-              <span style={{ fontSize: 11, color: "var(--text-secondary)", alignSelf: "center" }}>
-                Turno do modelo:
-              </span>
-              {TURNOS_VALIDOS.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  disabled={modo === "edit"}
-                  onClick={() => setTurnoExtra(t)}
-                  style={{
-                    padding: "4px 10px",
-                    borderRadius: 6,
-                    border: "1px solid",
-                    fontSize: 11,
-                    cursor: "pointer",
-                    borderColor: turnoFetch === t ? "var(--accent)" : "var(--border)",
-                    background: turnoFetch === t ? "var(--accent-soft)" : "transparent",
-                    color: turnoFetch === t ? "var(--accent)" : "var(--text-secondary)",
-                  }}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          )}
           <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
             {modo === "view" && (
               <>

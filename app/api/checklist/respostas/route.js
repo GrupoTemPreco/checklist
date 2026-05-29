@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase-service";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Body: { items: [{ avaliacao_id, pergunta_id, valor, pontos_obtidos, comentario?, plano_acao?, foto_url? }] }
  */
