@@ -794,7 +794,10 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
               const lista = sec.perguntas ?? [];
               const qtd = lista.length;
               const pontosMaxSecao = lista.reduce(
-                (acc, p) => acc + (Number(p.pontos_max) || 0),
+                (acc, p) =>
+                  p.ativo === false || p.ativo === "false"
+                    ? acc
+                    : acc + (Number(p.pontos_max) || 0),
                 0
               );
               return (

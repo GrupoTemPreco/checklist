@@ -569,12 +569,26 @@ function ResultadoPorSecaoExpandivel({ linhasPorSecao, respostas, avaliacaoKey }
               </span>
               <span
                 style={{
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: getScoreColor(s.percentual),
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  flexShrink: 0,
                 }}
               >
-                {s.percentual}%
+                <span
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: getScoreColor(s.percentual),
+                  }}
+                >
+                  {s.percentual}%
+                </span>
+                {s.pontos_max_secao != null && (
+                  <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                    {s.pontos_obtidos_secao ?? 0}/{s.pontos_max_secao} pts
+                  </span>
+                )}
               </span>
             </button>
             <div style={{ paddingLeft: 26 }}>
@@ -784,7 +798,7 @@ function ChecklistView({ userPerfil, uid }) {
         }
         const u = historicoFiltroUnidade.trim();
         if (u) params.set("unidade", u);
-        const res = await fetch(`/api/checklist/avaliacoes/historico?${params}`);
+        const res = await fetch(`/api/checklist/avaliacoes/historico?${params}`, { cache: "no-store" });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json.error || "Falha ao carregar histórico.");
         if (cancel) return;
@@ -1796,7 +1810,7 @@ function ChecklistView({ userPerfil, uid }) {
                 tipo_avaliador: atuaComoSupervisor ? "supervisor" : "gerente",
                 turno: turnoEscolhido,
               });
-              const chkRes = await fetch(`/api/checklist/avaliacoes/em-andamento?${qs}`);
+              const chkRes = await fetch(`/api/checklist/avaliacoes/em-andamento?${qs}`, { cache: "no-store" });
               const chkJson = await chkRes.json().catch(() => ({}));
               if (!chkRes.ok) throw new Error(chkJson.error || "Falha ao verificar avaliações em curso.");
 
@@ -2574,7 +2588,7 @@ function DashboardView({ userPerfil = "gerente" }) {
       setError(null);
       try {
         const qs = new URLSearchParams({ tipo_avaliador: tipoDashboard });
-        const res = await fetch(`/api/checklist/avaliacoes?${qs}`);
+        const res = await fetch(`/api/checklist/avaliacoes?${qs}`, { cache: "no-store" });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json.error || "Falha ao carregar avaliações.");
         if (cancel) return;
