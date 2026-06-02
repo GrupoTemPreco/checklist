@@ -759,6 +759,8 @@ function ChecklistView({ userPerfil, uid }) {
   const [histUnidLoading, setHistUnidLoading] = useState(false);
   const [histOpLoading, setHistOpLoading] = useState(false);
   const [histOpError, setHistOpError] = useState(null);
+  /** Nota global gravada na BD após concluir (fonte da verdade: função SQL). */
+  const [notaConclusaoBd, setNotaConclusaoBd] = useState(null);
 
   const atuaComoSupervisor =
     userPerfil === "supervisor" ||
@@ -897,15 +899,6 @@ function ChecklistView({ userPerfil, uid }) {
 
   const handleResposta = (pId, val) => setRespostas(r => ({ ...r, [pId]: val }));
 
-  const totalGeral = secoesLista.reduce((acc, s) => {
-    return acc + (s.perguntas ?? []).filter(p => {
-      if (p.tipo !== "condicional") return true;
-      return respostas[p.pergunta_pai_id]?.valor === p.resposta_pai_gatilho;
-    }).reduce((a, p) => a + (respostas[p.id]?.pontos || 0), 0);
-  }, 0);
-
-  const maxGeral = secoesLista.reduce((acc, s) => acc + (s.pontos_max ?? 0), 0);
-
   const voltarAoInicioChecklist = () => {
     setStep("identificacao");
     setSecaoAtual(0);
@@ -914,6 +907,7 @@ function ChecklistView({ userPerfil, uid }) {
     setAvaliacaoId(null);
     setSyncError(null);
     setModalSairOpen(false);
+    setNotaConclusaoBd(null);
   };
 
   async function iniciarNovaAvaliacao() {
@@ -936,6 +930,7 @@ function ChecklistView({ userPerfil, uid }) {
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error || "Não foi possível criar a avaliação.");
+    setNotaConclusaoBd(null);
     setSecoesLista(norm);
     setRespostas({});
     setAvaliacaoId(json.id);
@@ -1973,6 +1968,7 @@ function ChecklistView({ userPerfil, uid }) {
                       setSecoesLista(norm);
                       setRespostas(respostasPersistidasParaEstado(av.respostas));
                       setAvaliacaoId(av.id);
+                      setNotaConclusaoBd(null);
                       setSecaoAtual(0);
                       setStep("secao");
                     } catch (err) {
@@ -2042,8 +2038,26 @@ function ChecklistView({ userPerfil, uid }) {
   }
 
   if (step === "concluido") {
-    const pct = maxGeral > 0 ? Math.round((totalGeral / maxGeral) * 100) : 0;
-    const cor = getScoreColor(pct);
+    const pct =
+      notaConclusaoBd?.percentual != null && Number.isFinite(Number(notaConclusaoBd.percentual))
+        ? Math.round(Number(notaConclusaoBd.percentual))
+        : null;
+    const cor = pct != null ? getScoreColor(pct) : "var(--text-secondary)";
+    const scoreBg = pct != null ? getScoreBg(pct) : "var(--border)";
+    const ptsLinha =
+      notaConclusaoBd?.nota_total != null &&
+      notaConclusaoBd?.nota_maxima != null &&
+      Number.isFinite(Number(notaConclusaoBd.nota_total)) &&
+      Number.isFinite(Number(notaConclusaoBd.nota_maxima))
+        ? `${notaConclusaoBd.nota_total}/${notaConclusaoBd.nota_maxima} pts`
+        : "—";
+    const textoPontosGlobal =
+      notaConclusaoBd?.nota_total != null &&
+      notaConclusaoBd?.nota_maxima != null &&
+      Number.isFinite(Number(notaConclusaoBd.nota_total)) &&
+      Number.isFinite(Number(notaConclusaoBd.nota_maxima))
+        ? `${notaConclusaoBd.nota_total} de ${notaConclusaoBd.nota_maxima} pontos`
+        : "Pontuação indisponível (recarregue ou consulte o histórico).";
     const secoesMontarConclusao = (secoesLista ?? []).map((s) => ({
       id: s.id,
       titulo: s.titulo,
@@ -2108,14 +2122,12 @@ function ChecklistView({ userPerfil, uid }) {
                   style={{
                     fontSize: 28,
                     fontWeight: 800,
-                    color: getScoreColor(pct),
+                    color: pct != null ? getScoreColor(pct) : "var(--text-secondary)",
                   }}
                 >
-                  {pct}%
+                  {pct != null ? `${pct}%` : "—"}
                 </div>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                  {maxGeral > 0 ? `${totalGeral}/${maxGeral} pts` : "—"}
-                </div>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{ptsLinha}</div>
               </div>
             </div>
           </div>
@@ -2156,21 +2168,21 @@ function ChecklistView({ userPerfil, uid }) {
 
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", padding: "32px 16px", textAlign: "center" }}>
-        <div style={{ width: 80, height: 80, borderRadius: "50%", background: getScoreBg(pct), border: `3px solid ${cor}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: 32, fontWeight: 800, color: cor }}>
-          {pct}%
+        <div style={{ width: 80, height: 80, borderRadius: "50%", background: scoreBg, border: `3px solid ${cor}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: 32, fontWeight: 800, color: cor }}>
+          {pct != null ? `${pct}%` : "—"}
         </div>
         <h2 style={{ margin: "0 0 8px", color: "var(--text-primary)" }}>Avaliação concluída!</h2>
-        <p style={{ color: "var(--text-secondary)", margin: "0 0 24px" }}>{totalGeral} de {maxGeral} pontos</p>
+        <p style={{ color: "var(--text-secondary)", margin: "0 0 24px" }}>{textoPontosGlobal}</p>
 
         <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, marginBottom: 24, textAlign: "left" }}>
-          {secoesLista.map((s) => {
-            const maxS = s.pontos_max ?? 0;
-            const pts = (s.perguntas ?? []).reduce((a, p) => a + (respostas[p.id]?.pontos || 0), 0);
-            const pctS = maxS > 0 ? Math.round((pts / maxS) * 100) : 0;
+          {porSecaoConclusao.map((row) => {
+            const maxS = row.pontos_max_secao ?? 0;
+            const pts = row.pontos_obtidos_secao ?? 0;
+            const pctS = row.percentual ?? 0;
             return (
-              <div key={s.id} style={{ marginBottom: 14 }}>
+              <div key={row.secao_id} style={{ marginBottom: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                  <span style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 500 }}>{s.titulo}</span>
+                  <span style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 500 }}>{row.titulo}</span>
                   <span style={{ fontSize: 13, color: getScoreColor(pctS), fontWeight: 700 }}>{pts}/{maxS}</span>
                 </div>
                 <ProgressBar value={pts} max={maxS || 1} color={getScoreColor(pctS)} />
@@ -2209,6 +2221,7 @@ function ChecklistView({ userPerfil, uid }) {
           setAvaliacaoId(null);
           setSyncError(null);
           setConclusaoVerRespostasDetalhe(false);
+          setNotaConclusaoBd(null);
         }}
           style={{ width: "100%", padding: 14, borderRadius: 10, border: "1.5px solid var(--accent)", background: "transparent", color: "var(--accent)", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
           Nova avaliação
@@ -2339,6 +2352,11 @@ function ChecklistView({ userPerfil, uid }) {
                 });
                 const jsonFim = await resFim.json().catch(() => ({}));
                 if (!resFim.ok) throw new Error(jsonFim.error || "Não foi possível concluir a avaliação.");
+                setNotaConclusaoBd({
+                  nota_total: jsonFim.nota_total,
+                  nota_maxima: jsonFim.nota_maxima,
+                  percentual: jsonFim.percentual,
+                });
                 setStep("concluido");
               }
             } catch (err) {
@@ -2481,7 +2499,13 @@ function montarPorSecao(secoes, respostas) {
     const obt = soma.get(s.id) || 0;
     const max = s.pontos_max || 0;
     const percentual = max > 0 ? Math.min(100, Math.round((obt / max) * 100)) : 0;
-    return { secao_id: s.id, titulo: s.titulo, percentual };
+    return {
+      secao_id: s.id,
+      titulo: s.titulo,
+      percentual,
+      pontos_obtidos_secao: obt,
+      pontos_max_secao: max,
+    };
   });
 }
 

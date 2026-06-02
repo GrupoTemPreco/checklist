@@ -29,7 +29,22 @@ export async function POST(request) {
       return NextResponse.json({ error: rpcError.message }, { status: 400 });
     }
 
-    return NextResponse.json({ ok: true });
+    const { data: avRow, error: selError } = await supabase
+      .from("avaliacoes")
+      .select("nota_total, nota_maxima, percentual")
+      .eq("id", avaliacao_id)
+      .single();
+
+    if (selError) {
+      return NextResponse.json({ error: selError.message }, { status: 400 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      nota_total: avRow?.nota_total ?? null,
+      nota_maxima: avRow?.nota_maxima ?? null,
+      percentual: avRow?.percentual ?? null,
+    });
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: e.message ?? "Erro ao concluir avaliação." }, { status: 500 });
