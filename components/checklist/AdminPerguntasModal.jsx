@@ -791,7 +791,12 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
             secoes.map((sec) => {
               const sid = String(sec.id);
               const aberta = secoesAbertas.has(sid);
-              const qtd = sec.perguntas?.length ?? 0;
+              const lista = sec.perguntas ?? [];
+              const qtd = lista.length;
+              const pontosMaxSecao = lista.reduce(
+                (acc, p) => acc + (Number(p.pontos_max) || 0),
+                0
+              );
               return (
                 <div
                   key={sec.id}
@@ -838,8 +843,20 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
                     >
                       {sec.titulo}
                     </span>
-                    <span style={{ fontSize: 12, color: "var(--text-secondary)", flexShrink: 0 }}>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: "var(--text-secondary)",
+                        flexShrink: 1,
+                        minWidth: 0,
+                        textAlign: "right",
+                        lineHeight: 1.35,
+                      }}
+                    >
                       {qtd} {qtd === 1 ? "pergunta" : "perguntas"}
+                      <span style={{ marginLeft: 6, opacity: 0.92 }}>
+                        · Pontuação máxima: {pontosMaxSecao}
+                      </span>
                     </span>
                   </button>
                   {aberta && (
