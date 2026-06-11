@@ -275,6 +275,15 @@ function PerguntaFormFields({
           <input
             type="checkbox"
             disabled={readOnly}
+            checked={!!form.permite_nao_consta}
+            onChange={(e) => set("permite_nao_consta", e.target.checked)}
+          />
+          Permitir 'Não consta'
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginTop: 18 }}>
+          <input
+            type="checkbox"
+            disabled={readOnly}
             checked={form.obrigatoria !== false}
             onChange={(e) => set("obrigatoria", e.target.checked)}
           />
@@ -487,6 +496,12 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
     }
     return out;
   }, [secoes]);
+
+  const perguntasInativas = useMemo(
+    () =>
+      todasPerguntas.filter((p) => p.ativo === false || p.ativo === "false"),
+    [todasPerguntas]
+  );
 
   const salvarEdicoes = async () => {
     setSalvando(true);
@@ -792,12 +807,12 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
               const sid = String(sec.id);
               const aberta = secoesAbertas.has(sid);
               const lista = sec.perguntas ?? [];
-              const qtd = lista.length;
-              const pontosMaxSecao = lista.reduce(
-                (acc, p) =>
-                  p.ativo === false || p.ativo === "false"
-                    ? acc
-                    : acc + (Number(p.pontos_max) || 0),
+              const ativas = lista.filter(
+                (p) => !(p.ativo === false || p.ativo === "false")
+              );
+              const qtd = ativas.length;
+              const pontosMaxSecao = ativas.reduce(
+                (acc, p) => acc + (Number(p.pontos_max) || 0),
                 0
               );
               return (
@@ -865,16 +880,16 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
                   {aberta && (
                     <div style={{ padding: "0 12px 12px" }}>
                       {modo === "view" &&
-                        (qtd > 0 ? (
-                          sec.perguntas.map((p) => <PerguntaViewCard key={p.id} p={p} />)
+                        (ativas.length > 0 ? (
+                          ativas.map((p) => <PerguntaViewCard key={p.id} p={p} />)
                         ) : (
                           <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
-                            Sem perguntas.
+                            Sem perguntas ativas.
                           </p>
                         ))}
                       {modo === "edit" &&
-                        (qtd > 0 ? (
-                          sec.perguntas.map((p) => {
+                        (lista.length > 0 ? (
+                          lista.map((p) => {
                             const d = drafts[p.id] ?? perguntaParaForm(p);
                             return (
                               <div
@@ -909,6 +924,94 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
                 </div>
               );
             })}
+
+          {!loading && modo === "view" && secoes.length > 0 && (
+            <div
+              style={{
+                marginBottom: 12,
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                overflow: "hidden",
+                background: "var(--card-bg)",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => toggleSecao("__inativas__")}
+                style={{
+                  display: "flex",
+                  width: "100%",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "12px 14px",
+                  border: "none",
+                  background: secoesAbertas.has("__inativas__")
+                    ? "var(--border)"
+                    : "transparent",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 12,
+                    width: 16,
+                    color: "var(--text-secondary)",
+                    flexShrink: 0,
+                  }}
+                >
+                  {secoesAbertas.has("__inativas__") ? "▼" : "▶"}
+                </span>
+                <span
+                  style={{
+                    flex: 1,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  Perguntas inativas
+                </span>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "var(--text-secondary)",
+                    flexShrink: 0,
+                  }}
+                >
+                  {perguntasInativas.length}{" "}
+                  {perguntasInativas.length === 1 ? "pergunta" : "perguntas"}
+                </span>
+              </button>
+              {secoesAbertas.has("__inativas__") && (
+                <div style={{ padding: "0 12px 12px" }}>
+                  {perguntasInativas.length === 0 ? (
+                    <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
+                      Nenhuma pergunta inativa.
+                    </p>
+                  ) : (
+                    perguntasInativas.map((p) => (
+                      <div key={p.id}>
+                        <p
+                          style={{
+                            margin: "10px 0 4px",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: "var(--text-secondary)",
+                            textTransform: "uppercase",
+                            letterSpacing: 0.3,
+                          }}
+                        >
+                          {p.secao_titulo}
+                        </p>
+                        <PerguntaViewCard p={p} />
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

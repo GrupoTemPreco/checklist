@@ -174,6 +174,7 @@ create table public.respostas (
   pergunta_id     uuid not null references public.perguntas(id),
   valor           text,                    -- a opção escolhida ou texto livre
   pontos_obtidos  int not null default 0,
+  pontos_max      int not null default 0,  -- máximo da pergunta no momento da resposta (histórico)
   comentario      text,
   plano_acao      text,
   foto_url        text,                    -- URL do Supabase Storage

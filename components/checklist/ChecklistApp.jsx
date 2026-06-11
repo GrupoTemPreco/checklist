@@ -193,6 +193,7 @@ function PerguntaCard({ pergunta, resposta, onChange, avaliacaoId }) {
 
   const opcaoSelecionada = pergunta.opcoes?.find(o => o.valor === resposta?.valor);
   const precisaPlanoAcao = opcaoSelecionada?.plano_acao;
+  const isNaoConsta = resposta?.valor === "nao_consta";
 
   useEffect(() => {
     setShowPlanoAcao(!!precisaPlanoAcao);
@@ -208,13 +209,17 @@ function PerguntaCard({ pergunta, resposta, onChange, avaliacaoId }) {
   useEffect(() => () => revogarPreviewBlob(), []);
 
   const handleOpcao = (op) => {
-    onChange({
+    const payload = {
       valor: op.valor,
       pontos: op.pontos,
       comentario: resposta?.comentario || "",
       plano_acao: resposta?.plano_acao || "",
       foto_url: resposta?.foto_url || "",
-    });
+    };
+    if (op.valor === "nao_consta") {
+      payload.pontos_max_override = 0;
+    }
+    onChange(payload);
   };
 
   const handleFoto = async (e) => {
@@ -268,22 +273,48 @@ function PerguntaCard({ pergunta, resposta, onChange, avaliacaoId }) {
       </div>
 
       {(pergunta.tipo === "sim_nao" || pergunta.tipo === "escala_3" || pergunta.tipo === "escala_5" || pergunta.tipo === "condicional") && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-          {pergunta.opcoes?.map(op => (
-            <button type="button" key={op.valor} onClick={() => handleOpcao(op)}
-              style={{
-                flex: pergunta.tipo === "escala_5" ? "1 1 calc(33% - 4px)" : "1",
-                padding: "10px 8px", borderRadius: 8, border: "1.5px solid",
-                fontSize: 13, fontWeight: 500, cursor: "pointer", transition: "all 0.15s",
-                borderColor: resposta?.valor === op.valor ? "var(--accent)" : "var(--border)",
-                background: resposta?.valor === op.valor ? "var(--accent)" : "var(--card-bg)",
-                color: resposta?.valor === op.valor ? "#fff" : "var(--text-secondary)",
-              }}>
-              {op.label}
-              {op.pontos > 0 && <span style={{ display: "block", fontSize: 11, opacity: 0.8 }}>{op.pontos}pts</span>}
-            </button>
-          ))}
-        </div>
+        <>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8, opacity: isNaoConsta ? 0.45 : 1 }}>
+            {pergunta.opcoes?.map(op => (
+              <button type="button" key={op.valor} onClick={() => handleOpcao(op)}
+                style={{
+                  flex: pergunta.tipo === "escala_5" ? "1 1 calc(33% - 4px)" : "1",
+                  padding: "10px 8px", borderRadius: 8, border: "1.5px solid",
+                  fontSize: 13, fontWeight: 500, cursor: "pointer", transition: "all 0.15s",
+                  borderColor: resposta?.valor === op.valor ? "var(--accent)" : "var(--border)",
+                  background: resposta?.valor === op.valor ? "var(--accent)" : "var(--card-bg)",
+                  color: resposta?.valor === op.valor ? "#fff" : "var(--text-secondary)",
+                }}>
+                {op.label}
+                {op.pontos > 0 && <span style={{ display: "block", fontSize: 11, opacity: 0.8 }}>{op.pontos}pts</span>}
+              </button>
+            ))}
+          </div>
+          {pergunta.permite_nao_consta && (
+            <>
+              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0 12px" }} />
+              <button
+                type="button"
+                onClick={() => handleOpcao({ valor: "nao_consta", pontos: 0, label: "Não consta" })}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: "1.5px solid",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  marginBottom: 8,
+                  borderColor: isNaoConsta ? "var(--accent)" : "var(--border)",
+                  background: isNaoConsta ? "var(--accent)" : "transparent",
+                  color: isNaoConsta ? "#fff" : "var(--text-secondary)",
+                }}
+              >
+                Não consta
+              </button>
+            </>
+          )}
+        </>
       )}
 
       {pergunta.tipo === "nota_livre" && (
@@ -720,6 +751,7 @@ async function persistirRespostasDaSecao(avaliacao_id, sec, respostas) {
       pergunta_id,
       valor: String(r.valor),
       pontos_obtidos: r.pontos ?? 0,
+      pontos_max: String(r.valor) === "nao_consta" ? 0 : (Number(p.pontos_max) || 0),
       comentario: r.comentario || null,
       plano_acao: r.plano_acao || null,
       foto_url,
@@ -925,7 +957,7 @@ function ChecklistView({ userPerfil, uid }) {
   };
 
   async function iniciarNovaAvaliacao() {
-    const turnoParaBusca = atuaComoSupervisor ? "tarde" : "manha";
+    const turnoParaBusca = "tarde";
     const rawSecoes = await fetchSecoes(turnoParaBusca);
     const norm = normalizarSecoesDaApi(rawSecoes);
     if (!norm.length) {
@@ -953,15 +985,13 @@ function ChecklistView({ userPerfil, uid }) {
     setStep("secao");
   }
 
-  const turnoModeloHistorico =
-    historicoDetalhe != null
-      ? turnoModeloPorTipoAvaliador(historicoDetalhe.tipo_avaliador)
-      : null;
   const historicoSecoesParaMontagem =
-    turnoModeloHistorico == null
+    historicoDetalhe == null
       ? []
-      : (historicoSecoes ?? []).filter(
-          (sc) => (sc.turno ?? "manha") === turnoModeloHistorico
+      : secoesComRespostasParaMontar(
+          historicoSecoes,
+          historicoDetalhe.respostas,
+          turnoModeloPorTipoAvaliador(historicoDetalhe.tipo_avaliador)
         );
   const porSecaoHistorico =
     historicoDetalhe && historicoSecoesParaMontagem.length
@@ -1972,8 +2002,7 @@ function ChecklistView({ userPerfil, uid }) {
                     setIniciarLoading(true);
                     setSyncError(null);
                     try {
-                      const tipo = av.tipo_avaliador ?? "gerente";
-                      const turnoBusca = tipo === "supervisor" ? "tarde" : "manha";
+                      const turnoBusca = "tarde";
                       const rawSecoes = await fetchSecoes(turnoBusca);
                       const norm = normalizarSecoesDaApi(rawSecoes);
                       if (!norm.length) {
@@ -2502,15 +2531,36 @@ function sortAvaliacoesDesc(list) {
   });
 }
 
+function secoesComRespostasParaMontar(secoesLista, respostas, fallbackTurno = null) {
+  const secaoIds = new Set(
+    (respostas ?? [])
+      .map((r) => (r.secao_id != null ? String(r.secao_id) : null))
+      .filter(Boolean)
+  );
+  const todas = secoesLista ?? [];
+  const dasRespostas = todas
+    .filter((sc) => secaoIds.has(String(sc.id)))
+    .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
+  if (dasRespostas.length > 0) return dasRespostas;
+  if (fallbackTurno) {
+    return todas
+      .filter((sc) => (sc.turno ?? "manha") === fallbackTurno)
+      .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
+  }
+  return [...todas].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
+}
+
 function montarPorSecao(secoes, respostas) {
   const soma = new Map();
-  for (const s of secoes) soma.set(s.id, 0);
+  for (const s of secoes) soma.set(String(s.id), 0);
   for (const r of respostas || []) {
-    if (!r.secao_id || !soma.has(r.secao_id)) continue;
-    soma.set(r.secao_id, (soma.get(r.secao_id) || 0) + (r.pontos_obtidos || 0));
+    const sid = r.secao_id != null ? String(r.secao_id) : "";
+    if (!sid || !soma.has(sid)) continue;
+    soma.set(sid, (soma.get(sid) || 0) + (r.pontos_obtidos || 0));
   }
   return secoes.map((s) => {
-    const obt = soma.get(s.id) || 0;
+    const id = String(s.id);
+    const obt = soma.get(id) || 0;
     const max = s.pontos_max || 0;
     const percentual = max > 0 ? Math.min(100, Math.round((obt / max) * 100)) : 0;
     return {
@@ -2625,7 +2675,16 @@ function DashboardView({ userPerfil = "gerente" }) {
   const sel =
     detalhe?.id != null ? avaliacoesFiltradas.find((a) => a.id === detalhe.id) : null;
   const displayAv = sel ?? avaliacoesFiltradas[0] ?? null;
-  const porSecaoDisplay = displayAv ? montarPorSecao(secoes, displayAv.respostas) : [];
+  const porSecaoDisplay = displayAv
+    ? montarPorSecao(
+        secoesComRespostasParaMontar(
+          secoes,
+          displayAv.respostas,
+          turnoModeloPorTipoAvaliador(displayAv.tipo_avaliador)
+        ),
+        displayAv.respostas
+      )
+    : [];
 
   let deltaVsAnterior = null;
   if (filtro !== "todas" && avaliacoesFiltradas.length >= 2) {

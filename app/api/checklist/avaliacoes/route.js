@@ -19,11 +19,7 @@ export async function GET(request) {
       .select("id, ordem, titulo, pontos_max")
       .eq("ativo", true);
 
-    if (tipo === "gerente") {
-      qSec = qSec.eq("turno", "manha");
-    } else if (tipo === "supervisor") {
-      qSec = qSec.eq("turno", "tarde");
-    }
+    qSec = qSec.eq("turno", "tarde");
 
     const { data: secoesRaw, error: errSecoes } = await qSec.order("ordem", {
       ascending: true,

@@ -16,6 +16,15 @@ export async function POST(request) {
 
     const supabase = createServiceRoleClient();
 
+    const perguntaIds = items.map((i) => i.pergunta_id).filter(Boolean);
+    const { data: perguntas } = await supabase
+      .from("perguntas")
+      .select("id, pontos_max")
+      .in("id", perguntaIds);
+    const pontosMaxMap = Object.fromEntries(
+      (perguntas ?? []).map((p) => [p.id, p.pontos_max])
+    );
+
     for (const it of items) {
       const {
         avaliacao_id,
@@ -34,6 +43,7 @@ export async function POST(request) {
           pergunta_id,
           valor: valor != null ? String(valor) : "",
           pontos_obtidos,
+          pontos_max: String(it.valor) === "nao_consta" ? 0 : (pontosMaxMap[pergunta_id] ?? 0),
           comentario,
           plano_acao,
           foto_url,
