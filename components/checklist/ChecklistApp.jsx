@@ -3,8 +3,30 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { perguntaIdPorCodigo } from "@/lib/perguntaDbIds";
 import { perguntaEstaAtiva } from "@/lib/checklist-queries";
 import { turnoModeloPorTipoAvaliador, mapRespostasParaApi } from "@/lib/avaliacoes-resposta-map";
+import {
+  secoesComRespostasParaMontar,
+  montarPorSecao,
+  perfilParaImpressao,
+  buildUrlImprimirAvaliacao,
+} from "@/lib/avaliacao-load";
+import {
+  saveChecklistDraft,
+  findChecklistDraftToday,
+  clearChecklistDraft,
+  clearChecklistDraftPayload,
+  purgeOldChecklistDrafts,
+} from "@/lib/checklist-draft";
 import { fetchSecoes, uploadFoto } from "@/lib/supabase";
 import AdminPerguntasModal from "./AdminPerguntasModal";
+import {
+  indexarPendencias,
+  fetchPendenciasLoja,
+  BalaoPendenciaVerificacao,
+  CheckboxSinalizar,
+  BotaoVerHistoricoPendencia,
+  validarPendenciasAntesConcluir,
+  montarItemsSinalizacaoConcluir,
+} from "./SinalizacaoUI";
 
 const UUID_PERGUNTA = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 
@@ -184,7 +206,16 @@ function respostasPersistidasParaEstado(rows) {
 }
 
 // ─── COMPONENTE: PERGUNTA ───────────────────────────────────────────────────
-function PerguntaCard({ pergunta, resposta, onChange, avaliacaoId }) {
+function PerguntaCard({
+  pergunta,
+  resposta,
+  onChange,
+  avaliacaoId,
+  pendenciaComentario,
+  pendenciaPlano,
+  metaSinalizacao,
+  onMetaSinalizacao,
+}) {
   const [showPlanoAcao, setShowPlanoAcao] = useState(false);
   const [fotoLoading, setFotoLoading] = useState(false);
   const [fotoErro, setFotoErro] = useState(null);
@@ -194,7 +225,11 @@ function PerguntaCard({ pergunta, resposta, onChange, avaliacaoId }) {
   const opcaoSelecionada = pergunta.opcoes?.find(o => o.valor === resposta?.valor);
   const precisaPlanoAcao = opcaoSelecionada?.plano_acao;
   const isNaoConsta = resposta?.valor === "nao_consta";
-
+  const meta = metaSinalizacao || {};
+  const comentarioPreenchido = String(resposta?.comentario ?? "").trim() !== "";
+  const planoPreenchido = String(resposta?.plano_acao ?? "").trim() !== "";
+  const mostrarPlano =
+    showPlanoAcao || !!pendenciaPlano || planoPreenchido || !!meta.sinalizar_plano_acao;
   useEffect(() => {
     setShowPlanoAcao(!!precisaPlanoAcao);
   }, [precisaPlanoAcao]);
@@ -207,6 +242,10 @@ function PerguntaCard({ pergunta, resposta, onChange, avaliacaoId }) {
   };
 
   useEffect(() => () => revogarPreviewBlob(), []);
+
+  const patchMeta = (patch) => {
+    if (typeof onMetaSinalizacao === "function") onMetaSinalizacao(patch);
+  };
 
   const handleOpcao = (op) => {
     const payload = {
@@ -333,21 +372,73 @@ function PerguntaCard({ pergunta, resposta, onChange, avaliacaoId }) {
       )}
 
       {pergunta.tipo === "texto_livre" && (
-        <textarea placeholder="Digite sua observação..." rows={3}
-          value={resposta?.comentario || ""}
-          onChange={e => onChange({ valor: e.target.value, pontos: 0, comentario: e.target.value })}
-          style={{ width: "100%", borderRadius: 8, border: "1.5px solid var(--border)", padding: "10px 12px", fontSize: 14, resize: "vertical", background: "var(--card-bg)", color: "var(--text-primary)", boxSizing: "border-box" }} />
+        <>
+          <textarea placeholder="Digite sua observação..." rows={3}
+            value={resposta?.comentario || ""}
+            onChange={e => onChange({ valor: e.target.value, pontos: 0, comentario: e.target.value })}
+            style={{ width: "100%", borderRadius: 8, border: "1.5px solid var(--border)", padding: "10px 12px", fontSize: 14, resize: "vertical", background: "var(--card-bg)", color: "var(--text-primary)", boxSizing: "border-box" }} />
+          {pendenciaComentario ? (
+            <BalaoPendenciaVerificacao
+              pendencia={pendenciaComentario}
+              labelCampo="comentário"
+              verificacao={meta.verificacao_comentario}
+              motivo={meta.motivo_comentario}
+              onVerificacao={(v) =>
+                patchMeta({
+                  verificacao_comentario: v,
+                  motivo_comentario: v === "nao" ? meta.motivo_comentario || "" : "",
+                  sinalizar_comentario: false,
+                })
+              }
+              onMotivo={(t) => patchMeta({ motivo_comentario: t })}
+            />
+          ) : (
+            comentarioPreenchido && (
+              <CheckboxSinalizar
+                checked={!!meta.sinalizar_comentario}
+                onChange={(c) => patchMeta({ sinalizar_comentario: c })}
+                label="Sinalizar esse comentário pra próxima avaliação"
+              />
+            )
+          )}
+        </>
       )}
 
-      {showPlanoAcao && (
+      {mostrarPlano && (
         <div style={{ marginTop: 10, background: "#fff8f0", border: "1px solid #fed7aa", borderRadius: 8, padding: 12 }}>
           <label style={{ fontSize: 12, fontWeight: 600, color: "#c2410c", display: "block", marginBottom: 6 }}>
-            Plano de ação obrigatório
+            {precisaPlanoAcao ? "Plano de ação obrigatório" : "Plano de ação"}
           </label>
-          <textarea placeholder="Descreva o plano de ação..." rows={2}
-            value={resposta?.plano_acao || ""}
-            onChange={e => onChange({ ...resposta, plano_acao: e.target.value })}
-            style={{ width: "100%", borderRadius: 6, border: "1px solid #fed7aa", padding: "8px 10px", fontSize: 13, resize: "vertical", background: "#fff", boxSizing: "border-box" }} />
+          {!pendenciaPlano && (
+            <textarea placeholder="Descreva o plano de ação..." rows={2}
+              value={resposta?.plano_acao || ""}
+              onChange={e => onChange({ ...resposta, plano_acao: e.target.value })}
+              style={{ width: "100%", borderRadius: 6, border: "1px solid #fed7aa", padding: "8px 10px", fontSize: 13, resize: "vertical", background: "#fff", boxSizing: "border-box" }} />
+          )}
+          {pendenciaPlano ? (
+            <BalaoPendenciaVerificacao
+              pendencia={pendenciaPlano}
+              labelCampo="plano de ação"
+              verificacao={meta.verificacao_plano_acao}
+              motivo={meta.motivo_plano_acao}
+              onVerificacao={(v) =>
+                patchMeta({
+                  verificacao_plano_acao: v,
+                  motivo_plano_acao: v === "nao" ? meta.motivo_plano_acao || "" : "",
+                  sinalizar_plano_acao: false,
+                })
+              }
+              onMotivo={(t) => patchMeta({ motivo_plano_acao: t })}
+            />
+          ) : (
+            planoPreenchido && (
+              <CheckboxSinalizar
+                checked={!!meta.sinalizar_plano_acao}
+                onChange={(c) => patchMeta({ sinalizar_plano_acao: c })}
+                label="Sinalizar esse plano de ação pra próxima avaliação"
+              />
+            )
+          )}
         </div>
       )}
 
@@ -401,14 +492,56 @@ function PerguntaCard({ pergunta, resposta, onChange, avaliacaoId }) {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
-        {pergunta.tipo !== "texto_livre" && pergunta.tipo !== "nota_livre" && (
+      {pergunta.tipo !== "texto_livre" && pergunta.tipo !== "nota_livre" && (
+        <div style={{ marginTop: 10 }}>
           <textarea placeholder="Comentário (opcional)" rows={1}
             value={resposta?.comentario || ""}
             onChange={e => onChange({ ...resposta, comentario: e.target.value })}
-            style={{ flex: 1, borderRadius: 6, border: "1px solid var(--border)", padding: "6px 10px", fontSize: 12, resize: "none", background: "var(--card-bg)", color: "var(--text-secondary)", boxSizing: "border-box" }} />
-        )}
-      </div>
+            style={{ width: "100%", borderRadius: 6, border: "1px solid var(--border)", padding: "6px 10px", fontSize: 12, resize: "none", background: "var(--card-bg)", color: "var(--text-secondary)", boxSizing: "border-box" }} />
+          {pendenciaComentario ? (
+            <BalaoPendenciaVerificacao
+              pendencia={pendenciaComentario}
+              labelCampo="comentário"
+              verificacao={meta.verificacao_comentario}
+              motivo={meta.motivo_comentario}
+              onVerificacao={(v) =>
+                patchMeta({
+                  verificacao_comentario: v,
+                  motivo_comentario: v === "nao" ? meta.motivo_comentario || "" : "",
+                  sinalizar_comentario: false,
+                })
+              }
+              onMotivo={(t) => patchMeta({ motivo_comentario: t })}
+            />
+          ) : (
+            comentarioPreenchido && (
+              <CheckboxSinalizar
+                checked={!!meta.sinalizar_comentario}
+                onChange={(c) => patchMeta({ sinalizar_comentario: c })}
+                label="Sinalizar esse comentário pra próxima avaliação"
+              />
+            )
+          )}
+        </div>
+      )}
+
+      {/* Pendência de comentário em nota_livre (sem campo de comentário) */}
+      {pergunta.tipo === "nota_livre" && pendenciaComentario && (
+        <BalaoPendenciaVerificacao
+          pendencia={pendenciaComentario}
+          labelCampo="comentário"
+          verificacao={meta.verificacao_comentario}
+          motivo={meta.motivo_comentario}
+          onVerificacao={(v) =>
+            patchMeta({
+              verificacao_comentario: v,
+              motivo_comentario: v === "nao" ? meta.motivo_comentario || "" : "",
+              sinalizar_comentario: false,
+            })
+          }
+          onMotivo={(t) => patchMeta({ motivo_comentario: t })}
+        />
+      )}
     </div>
   );
 }
@@ -513,7 +646,7 @@ function ProgressBar({ value, max, color }) {
 }
 
 /** Resultado por seção com acordeão: perguntas e respostas da avaliação (Análise / histórico). */
-function ResultadoPorSecaoExpandivel({ linhasPorSecao, respostas, avaliacaoKey }) {
+function ResultadoPorSecaoExpandivel({ linhasPorSecao, respostas, avaliacaoKey, pendenciasMap }) {
   const [abertas, setAbertas] = useState(() => new Set());
 
   useEffect(() => {
@@ -645,7 +778,10 @@ function ResultadoPorSecaoExpandivel({ linhasPorSecao, respostas, avaliacaoKey }
                     Sem respostas registadas nesta seção.
                   </p>
                 ) : (
-                  perguntasLista.map((r, idx) => (
+                  perguntasLista.map((r, idx) => {
+                    const pid = r.pergunta_id != null ? String(r.pergunta_id) : "";
+                    const pend = pendenciasMap?.[pid] || {};
+                    return (
                     <div
                       key={`${r.pergunta_id}-${idx}`}
                       style={{
@@ -707,10 +843,22 @@ function ResultadoPorSecaoExpandivel({ linhasPorSecao, respostas, avaliacaoKey }
                             Comentário: {r.comentario}
                           </p>
                         )}
+                      {pend.comentario && (
+                        <BotaoVerHistoricoPendencia
+                          pendencia={pend.comentario}
+                          labelCampo="comentário"
+                        />
+                      )}
                       {r.plano_acao && (
                         <p style={{ margin: "6px 0 0", fontSize: 12, color: "#c2410c" }}>
                           Plano de ação: {r.plano_acao}
                         </p>
+                      )}
+                      {pend.plano_acao && (
+                        <BotaoVerHistoricoPendencia
+                          pendencia={pend.plano_acao}
+                          labelCampo="plano de ação"
+                        />
                       )}
                       <FotoRespostaVisualizacao fotoUrl={r.foto_url} />
                       <p
@@ -723,7 +871,8 @@ function ResultadoPorSecaoExpandivel({ linhasPorSecao, respostas, avaliacaoKey }
                         +{r.pontos_obtidos} pts
                       </p>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}
@@ -807,11 +956,193 @@ function ChecklistView({ userPerfil, uid }) {
   const [histOpError, setHistOpError] = useState(null);
   /** Nota global gravada na BD após concluir (fonte da verdade: função SQL). */
   const [notaConclusaoBd, setNotaConclusaoBd] = useState(null);
+  /** Rascunho localStorage pendente de confirmação do utilizador. */
+  const [modalRascunhoLocal, setModalRascunhoLocal] = useState(null);
+  const [rascunhoPromptFeito, setRascunhoPromptFeito] = useState(false);
+  const [rascunhoRestoreLoading, setRascunhoRestoreLoading] = useState(false);
+  const draftSaveTimerRef = useRef(null);
+  /** Pendências ativas da loja: { [pergunta_id]: { comentario, plano_acao } } */
+  const [pendenciasMap, setPendenciasMap] = useState({});
+  /** Meta UI de sinalização/verificação por pergunta (id da UI). */
+  const [metaSinalizacao, setMetaSinalizacao] = useState({});
+  const [pendenciasDetalheMap, setPendenciasDetalheMap] = useState({});
 
   const atuaComoSupervisor =
     userPerfil === "supervisor" ||
     (userPerfil === "admin" && adminModoChecklist === "supervisor");
+  const tipoAvaliadorAtual = atuaComoSupervisor ? "supervisor" : "gerente";
   const podeVerHistoricoAvaliacoes = atuaComoSupervisor || uid != null;
+
+  // Limpa rascunhos antigos e oferece restauração se houver rascunho de hoje
+  useEffect(() => {
+    purgeOldChecklistDrafts();
+    const draft = findChecklistDraftToday(uid);
+    if (draft) {
+      setModalRascunhoLocal(draft);
+    } else {
+      setRascunhoPromptFeito(true);
+    }
+  }, [uid]);
+
+  // Carrega pendências da loja ao entrar no preenchimento
+  useEffect(() => {
+    if (step !== "secao") return;
+    const loja = String(unidadeNome || "").trim();
+    if (!loja) {
+      setPendenciasMap({});
+      return;
+    }
+    let cancel = false;
+    (async () => {
+      try {
+        const lista = await fetchPendenciasLoja(loja);
+        if (!cancel) setPendenciasMap(indexarPendencias(lista));
+      } catch (e) {
+        console.error(e);
+        if (!cancel) setPendenciasMap({});
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [step, unidadeNome, avaliacaoId]);
+
+  // Pendências no detalhe do histórico
+  useEffect(() => {
+    if (step !== "historico" || !historicoDetalhe?.unidade) {
+      setPendenciasDetalheMap({});
+      return;
+    }
+    let cancel = false;
+    (async () => {
+      try {
+        const lista = await fetchPendenciasLoja(historicoDetalhe.unidade);
+        if (!cancel) setPendenciasDetalheMap(indexarPendencias(lista));
+      } catch (e) {
+        console.error(e);
+        if (!cancel) setPendenciasDetalheMap({});
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [step, historicoDetalhe?.id, historicoDetalhe?.unidade]);
+
+  // Autosave com debounce (~500ms)
+  useEffect(() => {
+    if (!rascunhoPromptFeito) return;
+    if (step !== "secao") return;
+    if (!avaliacaoId && Object.keys(respostas).length === 0) return;
+
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    draftSaveTimerRef.current = setTimeout(() => {
+      saveChecklistDraft({
+        uid,
+        tipoAvaliador: tipoAvaliadorAtual,
+        turno: turnoEscolhido,
+        avaliacaoId,
+        secaoAtual,
+        avaliador,
+        unidadeNome,
+        adminModoChecklist: userPerfil === "admin" ? adminModoChecklist : null,
+        respostas,
+      });
+    }, 500);
+
+    return () => {
+      if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    };
+  }, [
+    rascunhoPromptFeito,
+    step,
+    respostas,
+    secaoAtual,
+    avaliacaoId,
+    avaliador,
+    unidadeNome,
+    turnoEscolhido,
+    tipoAvaliadorAtual,
+    adminModoChecklist,
+    userPerfil,
+    uid,
+  ]);
+
+  async function restaurarRascunhoLocal(draft) {
+    if (!draft) return;
+    setRascunhoRestoreLoading(true);
+    setSyncError(null);
+    try {
+      if (userPerfil === "admin" && draft.adminModoChecklist) {
+        setAdminModoChecklist(
+          draft.adminModoChecklist === "gerente" ? "gerente" : "supervisor"
+        );
+      }
+      const turnoDraft =
+        draft.turno === "manha" || draft.turno === "tarde" || draft.turno === "noite"
+          ? draft.turno
+          : "manha";
+      setTurnoEscolhido(turnoDraft);
+      const nome = draft.avaliador ? String(draft.avaliador) : "";
+      const unidade = draft.unidadeNome ? String(draft.unidadeNome) : "";
+      if (nome) setAvaliador(nome);
+      if (unidade) setUnidadeNome(unidade);
+
+      const tipo =
+        draft.tipoAvaliador === "supervisor" ? "supervisor" : "gerente";
+
+      const rawSecoes = await fetchSecoes("tarde");
+      const norm = normalizarSecoesDaApi(rawSecoes);
+      if (!norm.length) {
+        throw new Error("Não há secções ativas para este turno.");
+      }
+
+      let idAvaliacao = draft.avaliacaoId ?? null;
+      if (!idAvaliacao) {
+        if (!nome.trim() || !unidade.trim()) {
+          throw new Error("Rascunho incompleto (faltam nome ou unidade).");
+        }
+        const res = await fetch("/api/checklist/iniciar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            avaliador_nome: nome.trim(),
+            unidade: unidade.trim(),
+            turno: turnoDraft,
+            tipo_avaliador: tipo,
+            uid: uid ?? null,
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || "Não foi possível reabrir a avaliação.");
+        idAvaliacao = json.id;
+      }
+
+      setSecoesLista(norm);
+      setRespostas(draft.respostas && typeof draft.respostas === "object" ? draft.respostas : {});
+      setMetaSinalizacao({});
+      setAvaliacaoId(idAvaliacao);
+      const maxIdx = Math.max(0, norm.length - 1);
+      const idx = Number(draft.secaoAtual) || 0;
+      setSecaoAtual(Math.min(Math.max(0, idx), maxIdx));
+      setNotaConclusaoBd(null);
+      setModalRascunhoLocal(null);
+      setRascunhoPromptFeito(true);
+      setStep("secao");
+    } catch (err) {
+      console.error(err);
+      setSyncError(err.message ?? "Não foi possível restaurar o rascunho.");
+      setModalRascunhoLocal(null);
+      setRascunhoPromptFeito(true);
+    } finally {
+      setRascunhoRestoreLoading(false);
+    }
+  }
+
+  function descartarRascunhoLocal() {
+    clearChecklistDraftPayload(modalRascunhoLocal);
+    setModalRascunhoLocal(null);
+    setRascunhoPromptFeito(true);
+  }
 
   useEffect(() => {
     if (step !== "historico") return;
@@ -950,6 +1281,8 @@ function ChecklistView({ userPerfil, uid }) {
     setSecaoAtual(0);
     setSecoesLista([]);
     setRespostas({});
+    setMetaSinalizacao({});
+    setPendenciasMap({});
     setAvaliacaoId(null);
     setSyncError(null);
     setModalSairOpen(false);
@@ -979,6 +1312,7 @@ function ChecklistView({ userPerfil, uid }) {
     setNotaConclusaoBd(null);
     setSecoesLista(norm);
     setRespostas({});
+    setMetaSinalizacao({});
     setAvaliacaoId(json.id);
     setSecaoAtual(0);
     setToastAviso("");
@@ -1017,6 +1351,12 @@ function ChecklistView({ userPerfil, uid }) {
   };
 
   const podeGestionarHistoricoLista = userPerfil === "admin" || userPerfil === "supervisor";
+
+  function urlImprimirAvaliacao(avaliacaoId) {
+    if (!avaliacaoId) return null;
+    const perfil = perfilParaImpressao({ userPerfil, atuaComoSupervisor });
+    return buildUrlImprimirAvaliacao(avaliacaoId, { perfil, uid });
+  }
 
   function refreshHistoricoLista() {
     setHistoricoRefreshKey((k) => k + 1);
@@ -1060,6 +1400,7 @@ function ChecklistView({ userPerfil, uid }) {
   }
 
   function renderHistoricoLinhaAvaliacao(av) {
+    const urlPdf = urlImprimirAvaliacao(av.id);
     return (
       <div
         key={av.id}
@@ -1164,25 +1505,22 @@ function ChecklistView({ userPerfil, uid }) {
             color={getScoreColor(av.percentual)}
           />
         </button>
-        {podeGestionarHistoricoLista ? (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "center",
-              gap: 6,
-              flexShrink: 0,
-              padding: "4px 0",
-            }}
-          >
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setHistOpError(null);
-                setHistEditModal(av);
-                setHistEditDraft(av.unidade ?? "");
-              }}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            gap: 6,
+            flexShrink: 0,
+            padding: "4px 0",
+          }}
+        >
+          {urlPdf && (
+            <a
+              href={urlPdf}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
               style={{
                 padding: "6px 10px",
                 fontSize: 12,
@@ -1190,34 +1528,62 @@ function ChecklistView({ userPerfil, uid }) {
                 borderRadius: 8,
                 border: "1px solid var(--border)",
                 background: "var(--card-bg)",
-                color: "var(--text-primary)",
+                color: "var(--accent)",
                 cursor: "pointer",
+                textDecoration: "none",
+                textAlign: "center",
+                whiteSpace: "nowrap",
               }}
             >
-              Editar
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setHistOpError(null);
-                setHistDelModal(av);
-              }}
-              style={{
-                padding: "6px 10px",
-                fontSize: 12,
-                fontWeight: 600,
-                borderRadius: 8,
-                border: "1px solid #fecaca",
-                background: "#fef2f2",
-                color: "#b91c1c",
-                cursor: "pointer",
-              }}
-            >
-              Eliminar
-            </button>
-          </div>
-        ) : null}
+              Gerar PDF
+            </a>
+          )}
+          {podeGestionarHistoricoLista ? (
+            <>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setHistOpError(null);
+                  setHistEditModal(av);
+                  setHistEditDraft(av.unidade ?? "");
+                }}
+                style={{
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "var(--card-bg)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                }}
+              >
+                Editar
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setHistOpError(null);
+                  setHistDelModal(av);
+                }}
+                style={{
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 8,
+                  border: "1px solid #fecaca",
+                  background: "#fef2f2",
+                  color: "#b91c1c",
+                  cursor: "pointer",
+                }}
+              >
+                Eliminar
+              </button>
+            </>
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -1536,6 +1902,7 @@ function ChecklistView({ userPerfil, uid }) {
               linhasPorSecao={porSecaoHistorico}
               respostas={historicoDetalhe.respostas}
               avaliacaoKey={historicoDetalhe.id}
+              pendenciasMap={pendenciasDetalheMap}
             />
           </>
         )}
@@ -1959,6 +2326,97 @@ function ChecklistView({ userPerfil, uid }) {
           </button>
         )}
 
+        {modalRascunhoLocal && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rascunho-local-title"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 210,
+              background: "rgba(15,23,42,0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              style={{
+                maxWidth: 400,
+                width: "100%",
+                borderRadius: 14,
+                padding: 20,
+                background: "var(--card-bg, #fff)",
+                border: "1px solid var(--border, #e2e8f0)",
+                boxShadow: "0 12px 40px rgba(15,23,42,0.14)",
+              }}
+            >
+              <p
+                id="rascunho-local-title"
+                style={{
+                  margin: "0 0 8px",
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: "var(--text-primary, #0f172a)",
+                }}
+              >
+                Respostas não enviadas
+              </p>
+              <p
+                style={{
+                  margin: "0 0 16px",
+                  fontSize: 14,
+                  color: "var(--text-secondary, #64748b)",
+                  lineHeight: 1.45,
+                }}
+              >
+                Encontramos respostas não enviadas de uma sessão anterior. Deseja
+                continuar de onde parou?
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <button
+                  type="button"
+                  disabled={rascunhoRestoreLoading}
+                  onClick={() => restaurarRascunhoLocal(modalRascunhoLocal)}
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    borderRadius: 10,
+                    border: "none",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: rascunhoRestoreLoading ? "not-allowed" : "pointer",
+                    background: "var(--accent, #0ea5e9)",
+                    color: "#fff",
+                  }}
+                >
+                  {rascunhoRestoreLoading ? "A restaurar…" : "Continuar de onde parei"}
+                </button>
+                <button
+                  type="button"
+                  disabled={rascunhoRestoreLoading}
+                  onClick={descartarRascunhoLocal}
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    borderRadius: 10,
+                    border: "1.5px solid var(--border, #e2e8f0)",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: rascunhoRestoreLoading ? "not-allowed" : "pointer",
+                    background: "transparent",
+                    color: "var(--text-primary, #0f172a)",
+                  }}
+                >
+                  Começar do zero
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {modalContinuar.open && modalContinuar.avaliacao && (
           <div
             role="dialog"
@@ -2010,6 +2468,7 @@ function ChecklistView({ userPerfil, uid }) {
                       }
                       setSecoesLista(norm);
                       setRespostas(respostasPersistidasParaEstado(av.respostas));
+                      setMetaSinalizacao({});
                       setAvaliacaoId(av.id);
                       setNotaConclusaoBd(null);
                       setSecaoAtual(0);
@@ -2179,6 +2638,7 @@ function ChecklistView({ userPerfil, uid }) {
             linhasPorSecao={porSecaoConclusao}
             respostas={respostasDetalheConclusao}
             avaliacaoKey={avaliacaoId ?? "conclusao"}
+            pendenciasMap={{}}
           />
 
           {podeVerHistoricoAvaliacoes && (
@@ -2233,6 +2693,32 @@ function ChecklistView({ userPerfil, uid }) {
             );
           })}
         </div>
+
+        {avaliacaoId && urlImprimirAvaliacao(avaliacaoId) && (
+          <a
+            href={urlImprimirAvaliacao(avaliacaoId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "block",
+              width: "100%",
+              padding: 14,
+              borderRadius: 10,
+              border: "none",
+              background: "var(--accent)",
+              color: "#fff",
+              fontSize: 15,
+              fontWeight: 700,
+              cursor: "pointer",
+              marginBottom: 12,
+              textDecoration: "none",
+              boxSizing: "border-box",
+              textAlign: "center",
+            }}
+          >
+            Gerar PDF
+          </a>
+        )}
 
         <button
           type="button"
@@ -2338,15 +2824,28 @@ function ChecklistView({ userPerfil, uid }) {
 
       {/* Perguntas */}
       <div style={{ padding: "16px 16px 100px" }}>
-        {perguntasVisiveis.map(p => (
+        {perguntasVisiveis.map(p => {
+          const dbId = idPerguntaParaGravar(p) || String(p.id);
+          const pend = pendenciasMap[dbId] || {};
+          return (
           <PerguntaCard
             key={p.id}
             pergunta={p}
             resposta={respostas[p.id]}
             avaliacaoId={avaliacaoId}
+            pendenciaComentario={pend.comentario}
+            pendenciaPlano={pend.plano_acao}
+            metaSinalizacao={metaSinalizacao[p.id]}
+            onMetaSinalizacao={(patch) =>
+              setMetaSinalizacao((m) => ({
+                ...m,
+                [p.id]: { ...(m[p.id] || {}), ...patch },
+              }))
+            }
             onChange={(val) => handleResposta(p.id, val)}
           />
-        ))}
+          );
+        })}
       </div>
 
       {/* Footer com navegação */}
@@ -2388,13 +2887,43 @@ function ChecklistView({ userPerfil, uid }) {
               if (secaoAtual < secoesLista.length - 1) {
                 setSecaoAtual((s) => s + 1);
               } else {
+                const errosPend = validarPendenciasAntesConcluir({
+                  secoesLista,
+                  idPerguntaParaGravar,
+                  pendenciasMap,
+                  metaSinalizacao,
+                });
+                if (errosPend.length > 0) {
+                  throw new Error(
+                    `Pendências sem resposta: ${errosPend.slice(0, 4).join("; ")}${
+                      errosPend.length > 4 ? "…" : ""
+                    }`
+                  );
+                }
+                const itemsSinalizacao = montarItemsSinalizacaoConcluir({
+                  secoesLista,
+                  respostas,
+                  idPerguntaParaGravar,
+                  pendenciasMap,
+                  metaSinalizacao,
+                });
                 const resFim = await fetch("/api/checklist/concluir", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ avaliacao_id: avaliacaoId }),
+                  body: JSON.stringify({
+                    avaliacao_id: avaliacaoId,
+                    items: itemsSinalizacao,
+                  }),
                 });
                 const jsonFim = await resFim.json().catch(() => ({}));
                 if (!resFim.ok) throw new Error(jsonFim.error || "Não foi possível concluir a avaliação.");
+                clearChecklistDraft({
+                  uid,
+                  tipoAvaliador: tipoAvaliadorAtual,
+                  turno: turnoEscolhido,
+                });
+                setMetaSinalizacao({});
+                setPendenciasMap({});
                 setNotaConclusaoBd({
                   nota_total: jsonFim.nota_total,
                   nota_maxima: jsonFim.nota_maxima,
@@ -2531,50 +3060,8 @@ function sortAvaliacoesDesc(list) {
   });
 }
 
-function secoesComRespostasParaMontar(secoesLista, respostas, fallbackTurno = null) {
-  const secaoIds = new Set(
-    (respostas ?? [])
-      .map((r) => (r.secao_id != null ? String(r.secao_id) : null))
-      .filter(Boolean)
-  );
-  const todas = secoesLista ?? [];
-  const dasRespostas = todas
-    .filter((sc) => secaoIds.has(String(sc.id)))
-    .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
-  if (dasRespostas.length > 0) return dasRespostas;
-  if (fallbackTurno) {
-    return todas
-      .filter((sc) => (sc.turno ?? "manha") === fallbackTurno)
-      .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
-  }
-  return [...todas].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
-}
-
-function montarPorSecao(secoes, respostas) {
-  const soma = new Map();
-  for (const s of secoes) soma.set(String(s.id), 0);
-  for (const r of respostas || []) {
-    const sid = r.secao_id != null ? String(r.secao_id) : "";
-    if (!sid || !soma.has(sid)) continue;
-    soma.set(sid, (soma.get(sid) || 0) + (r.pontos_obtidos || 0));
-  }
-  return secoes.map((s) => {
-    const id = String(s.id);
-    const obt = soma.get(id) || 0;
-    const max = s.pontos_max || 0;
-    const percentual = max > 0 ? Math.min(100, Math.round((obt / max) * 100)) : 0;
-    return {
-      secao_id: s.id,
-      titulo: s.titulo,
-      percentual,
-      pontos_obtidos_secao: obt,
-      pontos_max_secao: max,
-    };
-  });
-}
-
 // ─── VIEW: DASHBOARD ─────────────────────────────────────────────────────────
-function DashboardView({ userPerfil = "gerente" }) {
+function DashboardView({ userPerfil = "gerente", uid }) {
   const [perguntasModalOpen, setPerguntasModalOpen] = useState(false);
   const [tipoDashboard, setTipoDashboard] = useState(
     userPerfil === "supervisor" ? "supervisor" : "gerente"
@@ -2594,8 +3081,18 @@ function DashboardView({ userPerfil = "gerente" }) {
   const [unidadesEdicaoLoading, setUnidadesEdicaoLoading] = useState(false);
   const [dashboardAcaoLoading, setDashboardAcaoLoading] = useState(false);
   const [dashboardAcaoErro, setDashboardAcaoErro] = useState(null);
+  const [pendenciasDashMap, setPendenciasDashMap] = useState({});
 
   const podeGestionarAvaliacoes = userPerfil === "admin" || userPerfil === "supervisor";
+
+  function urlImprimirAvaliacaoDashboard(avaliacaoId) {
+    if (!avaliacaoId) return null;
+    const perfil = perfilParaImpressao({
+      userPerfil,
+      atuaComoSupervisor: userPerfil === "admin" || userPerfil === "supervisor",
+    });
+    return buildUrlImprimirAvaliacao(avaliacaoId, { perfil, uid });
+  }
 
   useEffect(() => {
     setAvaliacoesAnterioresAberto(false);
@@ -2675,6 +3172,28 @@ function DashboardView({ userPerfil = "gerente" }) {
   const sel =
     detalhe?.id != null ? avaliacoesFiltradas.find((a) => a.id === detalhe.id) : null;
   const displayAv = sel ?? avaliacoesFiltradas[0] ?? null;
+
+  useEffect(() => {
+    const loja = displayAv?.unidade;
+    if (!loja) {
+      setPendenciasDashMap({});
+      return;
+    }
+    let cancel = false;
+    (async () => {
+      try {
+        const lista = await fetchPendenciasLoja(loja);
+        if (!cancel) setPendenciasDashMap(indexarPendencias(lista));
+      } catch (e) {
+        console.error(e);
+        if (!cancel) setPendenciasDashMap({});
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [displayAv?.id, displayAv?.unidade]);
+
   const porSecaoDisplay = displayAv
     ? montarPorSecao(
         secoesComRespostasParaMontar(
@@ -2811,25 +3330,22 @@ function DashboardView({ userPerfil = "gerente" }) {
             color={getScoreColor(av.percentual)}
           />
         </button>
-        {podeGestionarAvaliacoes ? (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "center",
-              gap: 6,
-              flexShrink: 0,
-              padding: "4px 0",
-            }}
-          >
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setDashboardAcaoErro(null);
-                setModalEditarUnidade(av);
-                setEditUnidadeDraft(av.unidade ?? "");
-              }}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            gap: 6,
+            flexShrink: 0,
+            padding: "4px 0",
+          }}
+        >
+          {urlImprimirAvaliacaoDashboard(av.id) && (
+            <a
+              href={urlImprimirAvaliacaoDashboard(av.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
               style={{
                 padding: "6px 10px",
                 fontSize: 12,
@@ -2837,34 +3353,62 @@ function DashboardView({ userPerfil = "gerente" }) {
                 borderRadius: 8,
                 border: "1px solid var(--border)",
                 background: "var(--card-bg)",
-                color: "var(--text-primary)",
+                color: "var(--accent)",
                 cursor: "pointer",
+                textDecoration: "none",
+                textAlign: "center",
+                whiteSpace: "nowrap",
               }}
             >
-              Editar
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setDashboardAcaoErro(null);
-                setModalEliminarAval(av);
-              }}
-              style={{
-                padding: "6px 10px",
-                fontSize: 12,
-                fontWeight: 600,
-                borderRadius: 8,
-                border: "1px solid #fecaca",
-                background: "#fef2f2",
-                color: "#b91c1c",
-                cursor: "pointer",
-              }}
-            >
-              Eliminar
-            </button>
-          </div>
-        ) : null}
+              Gerar PDF
+            </a>
+          )}
+          {podeGestionarAvaliacoes ? (
+            <>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDashboardAcaoErro(null);
+                  setModalEditarUnidade(av);
+                  setEditUnidadeDraft(av.unidade ?? "");
+                }}
+                style={{
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "var(--card-bg)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                }}
+              >
+                Editar
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDashboardAcaoErro(null);
+                  setModalEliminarAval(av);
+                }}
+                style={{
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 8,
+                  border: "1px solid #fecaca",
+                  background: "#fef2f2",
+                  color: "#b91c1c",
+                  cursor: "pointer",
+                }}
+              >
+                Eliminar
+              </button>
+            </>
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -3156,8 +3700,29 @@ function DashboardView({ userPerfil = "gerente" }) {
                 </div>
               </div>
 
-              {podeGestionarAvaliacoes && (
-                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                {urlImprimirAvaliacaoDashboard(displayAv.id) && (
+                  <a
+                    href={urlImprimirAvaliacaoDashboard(displayAv.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 10,
+                      border: "1px solid var(--border)",
+                      background: "var(--card-bg)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      color: "var(--accent)",
+                      textDecoration: "none",
+                    }}
+                  >
+                    Gerar PDF
+                  </a>
+                )}
+                {podeGestionarAvaliacoes && (
+                  <>
                   <button
                     type="button"
                     onClick={() => {
@@ -3197,13 +3762,15 @@ function DashboardView({ userPerfil = "gerente" }) {
                   >
                     Eliminar avaliação
                   </button>
-                </div>
-              )}
+                  </>
+                )}
+              </div>
 
               <ResultadoPorSecaoExpandivel
                 linhasPorSecao={porSecaoDisplay}
                 respostas={displayAv.respostas}
                 avaliacaoKey={displayAv.id}
+                pendenciasMap={pendenciasDashMap}
               />
             </div>
           )}
@@ -3438,6 +4005,7 @@ export default function ChecklistApp({ userPerfil = "supervisor", uid }) {
       fontFamily: "var(--font-sans, system-ui, sans-serif)",
       minHeight: "100vh",
       background: "var(--bg)",
+      overscrollBehaviorY: "contain",
     }}>
       {/* Tab bar */}
       <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--bg)", position: "sticky", top: 0, zIndex: 20 }}>
@@ -3460,7 +4028,7 @@ export default function ChecklistApp({ userPerfil = "supervisor", uid }) {
       {aba === "checklist" ? (
         <ChecklistView userPerfil={userPerfil} uid={uid} />
       ) : (
-        <DashboardView userPerfil={userPerfil} />
+        <DashboardView userPerfil={userPerfil} uid={uid} />
       )}
     </div>
   );

@@ -1,0 +1,281 @@
+.imprimir-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 8px 0;
+}
+
+.imprimir-pdf-btn {
+  padding: 12px 18px;
+  border-radius: 10px;
+  border: none;
+  background: #0ea5e9;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.imprimir-voltar {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.avaliacao-print {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 16px 16px 32px;
+  color: #0f172a;
+  font-family: system-ui, sans-serif;
+  background: #fff;
+  /* Conteúdo flui com a altura natural — sem ocupar viewport */
+  min-height: 0;
+  height: auto;
+}
+
+.avaliacao-print-header {
+  border-bottom: 2px solid #0f172a;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+
+.avaliacao-print-header h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.avaliacao-print-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+  font-size: 13px;
+}
+
+.avaliacao-print-meta dt {
+  margin: 0;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.avaliacao-print-meta dd {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.avaliacao-print-nota {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.avaliacao-print-secao {
+  margin-bottom: 14px;
+  /* NÃO usar break-inside/page-break-inside aqui —
+     isso forçava seções inteiras para a página seguinte (páginas em branco). */
+}
+
+.avaliacao-print-secao-titulo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  border-bottom: 1px solid #cbd5e1;
+  padding-bottom: 4px;
+  margin-bottom: 6px;
+}
+
+.avaliacao-print-secao-titulo h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.avaliacao-print-pergunta {
+  padding: 6px 0;
+  border-bottom: 1px solid #e2e8f0;
+  /* Só o bloco da pergunta evita corte no meio da página */
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.avaliacao-print-pergunta:last-child {
+  border-bottom: none;
+}
+
+.avaliacao-print-codigo {
+  font-size: 11px;
+  font-weight: 700;
+  color: #0369a1;
+  margin-right: 8px;
+}
+
+.avaliacao-print-resposta {
+  margin: 3px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.avaliacao-print-nao-consta {
+  color: #475569;
+  background: #f1f5f9;
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.avaliacao-print-foto-link {
+  display: inline-block;
+  margin-top: 6px;
+  text-decoration: none;
+  color: #334155;
+  max-width: 140px;
+}
+
+.avaliacao-print-foto {
+  display: block;
+  max-width: 140px;
+  width: 140px;
+  height: auto;
+  object-fit: cover;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.avaliacao-print-foto-hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #475569;
+  font-weight: 500;
+}
+
+.avaliacao-print-erro {
+  max-width: 480px;
+  margin: 48px auto;
+  padding: 24px 16px;
+  text-align: center;
+  font-family: system-ui, sans-serif;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 8mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .avaliacao-print {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    min-height: 0 !important;
+    height: auto !important;
+  }
+
+  .avaliacao-print-header {
+    padding-bottom: 6px;
+    margin-bottom: 8px;
+  }
+
+  .avaliacao-print-header h1 {
+    margin: 0 0 4px;
+    font-size: 16px;
+  }
+
+  .avaliacao-print-meta {
+    gap: 2px 12px;
+    font-size: 11px;
+  }
+
+  .avaliacao-print-meta dd {
+    margin: 0 0 2px;
+  }
+
+  .avaliacao-print-nota {
+    font-size: 16px;
+  }
+
+  .avaliacao-print-secao {
+    margin-bottom: 8px;
+    /* Sem quebra forçada de página por seção */
+    break-inside: auto;
+    page-break-inside: auto;
+    break-before: auto;
+    page-break-before: auto;
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .avaliacao-print-secao-titulo {
+    padding-bottom: 2px;
+    margin-bottom: 4px;
+  }
+
+  .avaliacao-print-secao-titulo h2 {
+    font-size: 12px;
+  }
+
+  .avaliacao-print-pergunta {
+    padding: 4px 0;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+    border-radius: 0;
+  }
+
+  .avaliacao-print-resposta {
+    margin: 2px 0 0;
+    font-size: 12px;
+  }
+
+  .avaliacao-print-foto-link {
+    margin-top: 4px;
+    color: #334155 !important;
+  }
+
+  .avaliacao-print-foto {
+    max-width: 140px;
+    width: 140px;
+    height: auto;
+    object-fit: cover;
+    max-height: none;
+  }
+
+  .avaliacao-print-foto-hint {
+    color: #334155 !important;
+    font-size: 10px;
+  }
+
+  .avaliacao-print-header,
+  .avaliacao-print-secao {
+    box-shadow: none !important;
+    border-radius: 0;
+  }
+}

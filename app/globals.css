@@ -1,0 +1,5 @@
+/* Estilos globais do checklist (mobile / impressão auxiliar) */
+html,
+body {
+  overscroll-behavior-y: contain;
+}

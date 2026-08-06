@@ -1,3 +1,5 @@
+import "./globals.css";
+
 export const metadata = {
   title: "Checklist — Ultra Popular",
   description: "Avaliação de Loja · Turno da Manhã",
@@ -11,10 +13,18 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="pt-BR">
-      <body style={{ margin: 0, fontFamily: "system-ui, sans-serif", background: "#fff" }}>
+    <html lang="pt-BR" style={{ overscrollBehaviorY: "contain" }}>
+      <body
+        style={{
+          margin: 0,
+          fontFamily: "system-ui, sans-serif",
+          background: "#fff",
+          overscrollBehaviorY: "contain",
+        }}
+      >
         {children}
       </body>
     </html>
   );
 }
+
