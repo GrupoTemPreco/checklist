@@ -333,7 +333,7 @@ export function BotaoVerHistoricoPendencia({ pendencia, labelCampo }) {
 
 /**
  * Valida pendências ativas antes de concluir.
- * @returns {string[]} mensagens de erro (vazias = ok)
+ * @returns {Array<{ secIdx: number, secNum: number, perguntaId: string, codigo: string, mensagem: string }>}
  */
 export function validarPendenciasAntesConcluir({
   secoesLista,
@@ -342,32 +342,59 @@ export function validarPendenciasAntesConcluir({
   metaSinalizacao,
 }) {
   const erros = [];
-  for (const sec of secoesLista ?? []) {
+  for (let secIdx = 0; secIdx < (secoesLista ?? []).length; secIdx++) {
+    const sec = secoesLista[secIdx];
+    const secNum = secIdx + 1;
     for (const p of sec.perguntas ?? []) {
       const dbId = idPerguntaParaGravar(p) || String(p.id);
       const pend = pendenciasMap?.[dbId];
       if (!pend) continue;
       const meta = metaSinalizacao?.[p.id] || {};
       const codigo = p.codigo || dbId;
+      const perguntaId = p.id != null ? String(p.id) : dbId;
 
       if (pend.comentario) {
         if (meta.verificacao_comentario !== "sim" && meta.verificacao_comentario !== "nao") {
-          erros.push(`${codigo}: responda se o comentário pendente foi resolvido`);
+          erros.push({
+            secIdx,
+            secNum,
+            perguntaId,
+            codigo,
+            mensagem: "responda se o comentário pendente foi resolvido",
+          });
         } else if (
           meta.verificacao_comentario === "nao" &&
           !String(meta.motivo_comentario ?? "").trim()
         ) {
-          erros.push(`${codigo}: informe o motivo do comentário não resolvido`);
+          erros.push({
+            secIdx,
+            secNum,
+            perguntaId,
+            codigo,
+            mensagem: "informe o motivo do comentário não resolvido",
+          });
         }
       }
       if (pend.plano_acao) {
         if (meta.verificacao_plano_acao !== "sim" && meta.verificacao_plano_acao !== "nao") {
-          erros.push(`${codigo}: responda se o plano de ação pendente foi resolvido`);
+          erros.push({
+            secIdx,
+            secNum,
+            perguntaId,
+            codigo,
+            mensagem: "responda se o plano de ação pendente foi resolvido",
+          });
         } else if (
           meta.verificacao_plano_acao === "nao" &&
           !String(meta.motivo_plano_acao ?? "").trim()
         ) {
-          erros.push(`${codigo}: informe o motivo do plano de ação não resolvido`);
+          erros.push({
+            secIdx,
+            secNum,
+            perguntaId,
+            codigo,
+            mensagem: "informe o motivo do plano de ação não resolvido",
+          });
         }
       }
     }

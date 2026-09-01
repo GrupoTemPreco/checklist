@@ -94,6 +94,36 @@ function perguntasVisiveisNaSecao(secao, respostas) {
   }) ?? [];
 }
 
+/** Condicionais com gatilho inativo que têm pendência ativa (só para render). */
+function perguntasExtrasPendencia(secao, respostas, pendenciasMap, idPerguntaParaGravarFn) {
+  if (!secao?.perguntas || !pendenciasMap || typeof idPerguntaParaGravarFn !== "function") {
+    return [];
+  }
+  const fluxoIds = new Set(perguntasVisiveisNaSecao(secao, respostas).map((p) => p.id));
+  return secao.perguntas.filter((p) => {
+    if (p.tipo !== "condicional" || fluxoIds.has(p.id)) return false;
+    const pai = respostas[p.pergunta_pai_id];
+    if (pai?.valor === p.resposta_pai_gatilho) return false;
+    const dbId = idPerguntaParaGravarFn(p) || String(p.id);
+    const pend = pendenciasMap[dbId];
+    return !!(pend?.comentario || pend?.plano_acao);
+  });
+}
+
+function perguntasParaRenderNaSecao(secao, respostas, pendenciasMap, idPerguntaParaGravarFn) {
+  const fluxo = perguntasVisiveisNaSecao(secao, respostas);
+  const extras = perguntasExtrasPendencia(secao, respostas, pendenciasMap, idPerguntaParaGravarFn);
+  const seen = new Set(fluxo.map((p) => p.id));
+  const merged = [...fluxo];
+  for (const p of extras) {
+    if (!seen.has(p.id)) {
+      seen.add(p.id);
+      merged.push(p);
+    }
+  }
+  return merged;
+}
+
 function respostasFormParaDetalheExibicao(secoesLista, estadoRespostas) {
   const rows = [];
   for (const sec of secoesLista ?? []) {
@@ -215,6 +245,7 @@ function PerguntaCard({
   pendenciaPlano,
   metaSinalizacao,
   onMetaSinalizacao,
+  somenteResolucaoPendencia = false,
 }) {
   const [showPlanoAcao, setShowPlanoAcao] = useState(false);
   const [fotoLoading, setFotoLoading] = useState(false);
@@ -228,6 +259,8 @@ function PerguntaCard({
   const meta = metaSinalizacao || {};
   const comentarioPreenchido = String(resposta?.comentario ?? "").trim() !== "";
   const planoPreenchido = String(resposta?.plano_acao ?? "").trim() !== "";
+  const mostrarComentario =
+    comentarioPreenchido || !!pendenciaComentario || !!meta.sinalizar_comentario;
   const mostrarPlano =
     showPlanoAcao || !!pendenciaPlano || planoPreenchido || !!meta.sinalizar_plano_acao;
   useEffect(() => {
@@ -303,14 +336,71 @@ function PerguntaCard({
   };
 
   return (
-    <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px", marginBottom: 12 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 12 }}>
+    <div
+      id={`pergunta-card-${pergunta.id}`}
+      style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px", marginBottom: 12 }}
+    >
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 12, flexWrap: "wrap" }}>
         <span style={{ background: "var(--accent-soft)", color: "var(--accent)", fontSize: 11, fontWeight: 600, borderRadius: 6, padding: "2px 7px", whiteSpace: "nowrap", marginTop: 2 }}>
           {pergunta.codigo}
         </span>
-        <p style={{ margin: 0, fontSize: 14, color: "var(--text-primary)", lineHeight: 1.5 }}>{pergunta.texto}</p>
+        {somenteResolucaoPendencia && (
+          <span
+            style={{
+              background: "#f3f4f6",
+              color: "#6b7280",
+              fontSize: 10,
+              fontWeight: 600,
+              borderRadius: 6,
+              padding: "2px 7px",
+              whiteSpace: "nowrap",
+              marginTop: 2,
+              border: "1px solid #e5e7eb",
+            }}
+          >
+            Somente resolução de pendência
+          </span>
+        )}
+        <p style={{ margin: 0, fontSize: 14, color: "var(--text-primary)", lineHeight: 1.5, flex: "1 1 100%" }}>{pergunta.texto}</p>
       </div>
 
+      {somenteResolucaoPendencia ? (
+        <>
+          {pendenciaComentario && (
+            <BalaoPendenciaVerificacao
+              pendencia={pendenciaComentario}
+              labelCampo="comentário"
+              verificacao={meta.verificacao_comentario}
+              motivo={meta.motivo_comentario}
+              onVerificacao={(v) =>
+                patchMeta({
+                  verificacao_comentario: v,
+                  motivo_comentario: v === "nao" ? meta.motivo_comentario || "" : "",
+                  sinalizar_comentario: false,
+                })
+              }
+              onMotivo={(t) => patchMeta({ motivo_comentario: t })}
+            />
+          )}
+          {pendenciaPlano && (
+            <BalaoPendenciaVerificacao
+              pendencia={pendenciaPlano}
+              labelCampo="plano de ação"
+              verificacao={meta.verificacao_plano_acao}
+              motivo={meta.motivo_plano_acao}
+              onVerificacao={(v) =>
+                patchMeta({
+                  verificacao_plano_acao: v,
+                  motivo_plano_acao: v === "nao" ? meta.motivo_plano_acao || "" : "",
+                  sinalizar_plano_acao: false,
+                })
+              }
+              onMotivo={(t) => patchMeta({ motivo_plano_acao: t })}
+            />
+          )}
+        </>
+      ) : (
+        <>
       {(pergunta.tipo === "sim_nao" || pergunta.tipo === "escala_3" || pergunta.tipo === "escala_5" || pergunta.tipo === "condicional") && (
         <>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8, opacity: isNaoConsta ? 0.45 : 1 }}>
@@ -377,23 +467,23 @@ function PerguntaCard({
             value={resposta?.comentario || ""}
             onChange={e => onChange({ valor: e.target.value, pontos: 0, comentario: e.target.value })}
             style={{ width: "100%", borderRadius: 8, border: "1.5px solid var(--border)", padding: "10px 12px", fontSize: 14, resize: "vertical", background: "var(--card-bg)", color: "var(--text-primary)", boxSizing: "border-box" }} />
-          {pendenciaComentario ? (
-            <BalaoPendenciaVerificacao
-              pendencia={pendenciaComentario}
-              labelCampo="comentário"
-              verificacao={meta.verificacao_comentario}
-              motivo={meta.motivo_comentario}
-              onVerificacao={(v) =>
-                patchMeta({
-                  verificacao_comentario: v,
-                  motivo_comentario: v === "nao" ? meta.motivo_comentario || "" : "",
-                  sinalizar_comentario: false,
-                })
-              }
-              onMotivo={(t) => patchMeta({ motivo_comentario: t })}
-            />
-          ) : (
-            comentarioPreenchido && (
+          {mostrarComentario && (
+            pendenciaComentario ? (
+              <BalaoPendenciaVerificacao
+                pendencia={pendenciaComentario}
+                labelCampo="comentário"
+                verificacao={meta.verificacao_comentario}
+                motivo={meta.motivo_comentario}
+                onVerificacao={(v) =>
+                  patchMeta({
+                    verificacao_comentario: v,
+                    motivo_comentario: v === "nao" ? meta.motivo_comentario || "" : "",
+                    sinalizar_comentario: false,
+                  })
+                }
+                onMotivo={(t) => patchMeta({ motivo_comentario: t })}
+              />
+            ) : (
               <CheckboxSinalizar
                 checked={!!meta.sinalizar_comentario}
                 onChange={(c) => patchMeta({ sinalizar_comentario: c })}
@@ -498,23 +588,23 @@ function PerguntaCard({
             value={resposta?.comentario || ""}
             onChange={e => onChange({ ...resposta, comentario: e.target.value })}
             style={{ width: "100%", borderRadius: 6, border: "1px solid var(--border)", padding: "6px 10px", fontSize: 12, resize: "none", background: "var(--card-bg)", color: "var(--text-secondary)", boxSizing: "border-box" }} />
-          {pendenciaComentario ? (
-            <BalaoPendenciaVerificacao
-              pendencia={pendenciaComentario}
-              labelCampo="comentário"
-              verificacao={meta.verificacao_comentario}
-              motivo={meta.motivo_comentario}
-              onVerificacao={(v) =>
-                patchMeta({
-                  verificacao_comentario: v,
-                  motivo_comentario: v === "nao" ? meta.motivo_comentario || "" : "",
-                  sinalizar_comentario: false,
-                })
-              }
-              onMotivo={(t) => patchMeta({ motivo_comentario: t })}
-            />
-          ) : (
-            comentarioPreenchido && (
+          {mostrarComentario && (
+            pendenciaComentario ? (
+              <BalaoPendenciaVerificacao
+                pendencia={pendenciaComentario}
+                labelCampo="comentário"
+                verificacao={meta.verificacao_comentario}
+                motivo={meta.motivo_comentario}
+                onVerificacao={(v) =>
+                  patchMeta({
+                    verificacao_comentario: v,
+                    motivo_comentario: v === "nao" ? meta.motivo_comentario || "" : "",
+                    sinalizar_comentario: false,
+                  })
+                }
+                onMotivo={(t) => patchMeta({ motivo_comentario: t })}
+              />
+            ) : (
               <CheckboxSinalizar
                 checked={!!meta.sinalizar_comentario}
                 onChange={(c) => patchMeta({ sinalizar_comentario: c })}
@@ -526,7 +616,7 @@ function PerguntaCard({
       )}
 
       {/* Pendência de comentário em nota_livre (sem campo de comentário) */}
-      {pergunta.tipo === "nota_livre" && pendenciaComentario && (
+      {pergunta.tipo === "nota_livre" && mostrarComentario && pendenciaComentario && (
         <BalaoPendenciaVerificacao
           pendencia={pendenciaComentario}
           labelCampo="comentário"
@@ -541,6 +631,8 @@ function PerguntaCard({
           }
           onMotivo={(t) => patchMeta({ motivo_comentario: t })}
         />
+      )}
+        </>
       )}
     </div>
   );
@@ -966,12 +1058,19 @@ function ChecklistView({ userPerfil, uid }) {
   /** Meta UI de sinalização/verificação por pergunta (id da UI). */
   const [metaSinalizacao, setMetaSinalizacao] = useState({});
   const [pendenciasDetalheMap, setPendenciasDetalheMap] = useState({});
+  const [pendenciasCarregando, setPendenciasCarregando] = useState(false);
+  const [errosPendenciasLista, setErrosPendenciasLista] = useState([]);
+  const [scrollParaPerguntaId, setScrollParaPerguntaId] = useState(null);
 
   const atuaComoSupervisor =
     userPerfil === "supervisor" ||
     (userPerfil === "admin" && adminModoChecklist === "supervisor");
   const tipoAvaliadorAtual = atuaComoSupervisor ? "supervisor" : "gerente";
   const podeVerHistoricoAvaliacoes = atuaComoSupervisor || uid != null;
+  const bypassValidacao =
+    userPerfil === "admin" &&
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("debug") === "1";
 
   // Limpa rascunhos antigos e oferece restauração se houver rascunho de hoje
   useEffect(() => {
@@ -986,10 +1085,15 @@ function ChecklistView({ userPerfil, uid }) {
 
   // Carrega pendências da loja ao entrar no preenchimento
   useEffect(() => {
-    if (step !== "secao") return;
+    if (step !== "secao") {
+      setPendenciasCarregando(false);
+      return;
+    }
+    setPendenciasCarregando(true);
     const loja = String(unidadeNome || "").trim();
     if (!loja) {
       setPendenciasMap({});
+      setPendenciasCarregando(false);
       return;
     }
     let cancel = false;
@@ -1000,6 +1104,8 @@ function ChecklistView({ userPerfil, uid }) {
       } catch (e) {
         console.error(e);
         if (!cancel) setPendenciasMap({});
+      } finally {
+        if (!cancel) setPendenciasCarregando(false);
       }
     })();
     return () => {
@@ -1264,17 +1370,136 @@ function ChecklistView({ userPerfil, uid }) {
 
   const secao = secoesLista[secaoAtual];
 
-  const perguntasVisiveis = secao ? perguntasVisiveisNaSecao(secao, respostas) : [];
+  const perguntasFluxoSecao = secao ? perguntasVisiveisNaSecao(secao, respostas) : [];
+  const perguntasExtrasPendenciaLista = secao
+    ? perguntasExtrasPendencia(secao, respostas, pendenciasMap, idPerguntaParaGravar)
+    : [];
+  const perguntasParaRender = secao
+    ? perguntasParaRenderNaSecao(secao, respostas, pendenciasMap, idPerguntaParaGravar)
+    : [];
+  const extrasPendenciaIds = new Set(perguntasExtrasPendenciaLista.map((p) => p.id));
 
-  const pontosSecao = perguntasVisiveis.reduce((acc, p) => acc + (respostas[p.id]?.pontos || 0), 0);
-  const pontosMaxSecao = perguntasVisiveis.reduce((acc, p) => acc + p.pontos_max, 0);
-  const totalRespondidas = perguntasVisiveis.filter(p => respostas[p.id]?.valor !== undefined && respostas[p.id]?.valor !== "").length;
-  const totalObrigatorias = perguntasVisiveis.filter(p => p.obrigatoria).length;
-  const respondidasObrig = perguntasVisiveis.filter(p => p.obrigatoria && respostas[p.id]?.valor !== undefined && respostas[p.id]?.valor !== "").length;
+  const pontosSecao = perguntasFluxoSecao.reduce((acc, p) => acc + (respostas[p.id]?.pontos || 0), 0);
+  const pontosMaxSecao = perguntasFluxoSecao.reduce((acc, p) => acc + p.pontos_max, 0);
+  const totalObrigatorias = perguntasFluxoSecao.filter(p => p.obrigatoria).length;
+  const respondidasObrig = perguntasFluxoSecao.filter(p => p.obrigatoria && respostas[p.id]?.valor !== undefined && respostas[p.id]?.valor !== "").length;
 
-  const podeProsseguir = respondidasObrig >= totalObrigatorias;
+  const podeProsseguir = bypassValidacao || respondidasObrig >= totalObrigatorias;
+  const ehUltimaSecao = secaoAtual >= secoesLista.length - 1;
+  const mostrarBotaoConcluir = ehUltimaSecao || bypassValidacao;
+  const podeClicarConcluir = podeProsseguir && !navegarLoading && !pendenciasCarregando;
 
   const handleResposta = (pId, val) => setRespostas(r => ({ ...r, [pId]: val }));
+
+  function scrollParaPergunta(perguntaId) {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        document
+          .getElementById(`pergunta-card-${perguntaId}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 80);
+    });
+  }
+
+  function irParaPendencia(secIdx, perguntaId) {
+    setErrosPendenciasLista([]);
+    if (secIdx !== secaoAtual) {
+      setScrollParaPerguntaId(perguntaId);
+      setSecaoAtual(secIdx);
+    } else {
+      scrollParaPergunta(perguntaId);
+    }
+  }
+
+  useEffect(() => {
+    if (!scrollParaPerguntaId || pendenciasCarregando) return;
+    scrollParaPergunta(scrollParaPerguntaId);
+    setScrollParaPerguntaId(null);
+  }, [secaoAtual, scrollParaPerguntaId, pendenciasCarregando]);
+
+  async function irParaProximaSecao() {
+    if (!avaliacaoId) {
+      setSyncError("Sessão de avaliação inválida. Volte e inicie novamente.");
+      return;
+    }
+    setSyncError(null);
+    setNavegarLoading(true);
+    try {
+      await persistirRespostasDaSecao(avaliacaoId, secao, respostas);
+      setSecaoAtual((s) => s + 1);
+    } catch (err) {
+      console.error(err);
+      setSyncError(err.message ?? "Não foi possível guardar as respostas.");
+    } finally {
+      setNavegarLoading(false);
+    }
+  }
+
+  async function executarConclusao() {
+    if (!avaliacaoId) {
+      setSyncError("Sessão de avaliação inválida. Volte e inicie novamente.");
+      return;
+    }
+    if (bypassValidacao) {
+      const ok = window.confirm(
+        "Concluir sem validação? Perguntas não respondidas ficarão em branco."
+      );
+      if (!ok) return;
+    }
+    setSyncError(null);
+    setErrosPendenciasLista([]);
+    setNavegarLoading(true);
+    try {
+      await persistirRespostasDaSecao(avaliacaoId, secao, respostas);
+      if (!bypassValidacao) {
+        const errosPend = validarPendenciasAntesConcluir({
+          secoesLista,
+          idPerguntaParaGravar,
+          pendenciasMap,
+          metaSinalizacao,
+        });
+        if (errosPend.length > 0) {
+          setErrosPendenciasLista(errosPend);
+          return;
+        }
+      }
+      const itemsSinalizacao = montarItemsSinalizacaoConcluir({
+        secoesLista,
+        respostas,
+        idPerguntaParaGravar,
+        pendenciasMap,
+        metaSinalizacao,
+      });
+      const resFim = await fetch("/api/checklist/concluir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          avaliacao_id: avaliacaoId,
+          items: itemsSinalizacao,
+        }),
+      });
+      const jsonFim = await resFim.json().catch(() => ({}));
+      if (!resFim.ok) throw new Error(jsonFim.error || "Não foi possível concluir a avaliação.");
+      clearChecklistDraft({
+        uid,
+        tipoAvaliador: tipoAvaliadorAtual,
+        turno: turnoEscolhido,
+      });
+      setMetaSinalizacao({});
+      setPendenciasMap({});
+      setNotaConclusaoBd({
+        nota_total: jsonFim.nota_total,
+        nota_maxima: jsonFim.nota_maxima,
+        percentual: jsonFim.percentual,
+      });
+      setStep("concluido");
+    } catch (err) {
+      console.error(err);
+      setSyncError(err.message ?? "Não foi possível guardar as respostas.");
+    } finally {
+      setNavegarLoading(false);
+    }
+  }
 
   const voltarAoInicioChecklist = () => {
     setStep("identificacao");
@@ -2792,39 +3017,113 @@ function ChecklistView({ userPerfil, uid }) {
   }
 
   return (
-    <div style={{ maxWidth: 540, margin: "0 auto" }}>
+    <div style={{ maxWidth: 540, margin: "0 auto", paddingTop: bypassValidacao ? 37 : 0 }}>
+      {bypassValidacao && (
+        <div
+          role="status"
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 30,
+            background: "#ea580c",
+            color: "#fff",
+            textAlign: "center",
+            padding: "8px 16px",
+            fontSize: 13,
+            fontWeight: 800,
+            letterSpacing: "0.02em",
+          }}
+        >
+          MODO TESTE — validações desativadas
+        </div>
+      )}
       {/* Header fixo com progresso */}
-      <div style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)", padding: "12px 16px", position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ flex: 1 }}>
-            <span style={{ fontSize: 12, color: "var(--text-secondary)", display: "block", marginBottom: 2 }}>
-              Seção {secaoAtual + 1} de {secoesLista.length}
-            </span>
-            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{secao.titulo}</h2>
+      <div style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)", position: "sticky", top: bypassValidacao ? 37 : 0, zIndex: 10 }}>
+        <div style={{ padding: "12px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ flex: 1 }}>
+              <span style={{ fontSize: 12, color: "var(--text-secondary)", display: "block", marginBottom: 2 }}>
+                Seção {secaoAtual + 1} de {secoesLista.length}
+              </span>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>{secao.titulo}</h2>
+            </div>
+            <div style={{ marginLeft: 12, textAlign: "right" }}>
+              <span style={{ fontSize: 18, fontWeight: 800, color: getScoreColor(pontosMaxSecao > 0 ? Math.round((pontosSecao/pontosMaxSecao)*100) : 0) }}>{pontosSecao}</span>
+              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>/{pontosMaxSecao}pts</span>
+            </div>
           </div>
-          <div style={{ marginLeft: 12, textAlign: "right" }}>
-            <span style={{ fontSize: 18, fontWeight: 800, color: getScoreColor(pontosMaxSecao > 0 ? Math.round((pontosSecao/pontosMaxSecao)*100) : 0) }}>{pontosSecao}</span>
-            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>/{pontosMaxSecao}pts</span>
+          {/* Progresso geral (bolinhas) */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+            {secoesLista.map((s, i) => (
+              <div key={s.id} style={{ flex: 1, height: 4, borderRadius: 2, background: i < secaoAtual ? "var(--accent)" : i === secaoAtual ? "#93c5fd" : "var(--border)" }} />
+            ))}
           </div>
-        </div>
-        {/* Progresso geral (bolinhas) */}
-        <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-          {secoesLista.map((s, i) => (
-            <div key={s.id} style={{ flex: 1, height: 4, borderRadius: 2, background: i < secaoAtual ? "var(--accent)" : i === secaoAtual ? "#93c5fd" : "var(--border)" }} />
-          ))}
-        </div>
-        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-          {respondidasObrig}/{totalObrigatorias} obrigatórias respondidas
+          <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+            {respondidasObrig}/{totalObrigatorias} obrigatórias respondidas
+          </div>
         </div>
       </div>
 
-      {syncError && (
+      {errosPendenciasLista.length > 0 && (
+        <div style={{ padding: "8px 16px 0", fontSize: 13, color: "#b91c1c" }}>
+          <p style={{ margin: "0 0 8px", fontWeight: 600 }}>Pendências sem resposta:</p>
+          <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
+            {errosPendenciasLista.map((erro, i) => (
+              <li key={`${erro.secIdx}-${erro.perguntaId}-${i}`} style={{ marginBottom: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => irParaPendencia(erro.secIdx, erro.perguntaId)}
+                  style={{
+                    padding: 0,
+                    border: "none",
+                    background: "none",
+                    color: "#b91c1c",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    textAlign: "left",
+                    textDecoration: "underline",
+                    cursor: "pointer",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  Seção {erro.secNum} — {erro.codigo}: {erro.mensagem}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {syncError && errosPendenciasLista.length === 0 && (
         <div style={{ padding: "8px 16px 0", fontSize: 13, color: "#b91c1c" }}>{syncError}</div>
       )}
 
       {/* Perguntas */}
-      <div style={{ padding: "16px 16px 100px" }}>
-        {perguntasVisiveis.map(p => {
+      <div style={{ padding: "16px 16px 100px", position: "relative" }}>
+        {pendenciasCarregando && (
+          <div
+            role="status"
+            aria-live="polite"
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 5,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "rgba(255, 255, 255, 0.75)",
+              borderRadius: 8,
+              minHeight: 120,
+            }}
+          >
+            <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)" }}>
+              A carregar pendências…
+            </span>
+          </div>
+        )}
+        {perguntasParaRender.map(p => {
           const dbId = idPerguntaParaGravar(p) || String(p.id);
           const pend = pendenciasMap[dbId] || {};
           return (
@@ -2835,6 +3134,7 @@ function ChecklistView({ userPerfil, uid }) {
             avaliacaoId={avaliacaoId}
             pendenciaComentario={pend.comentario}
             pendenciaPlano={pend.plano_acao}
+            somenteResolucaoPendencia={extrasPendenciaIds.has(p.id)}
             metaSinalizacao={metaSinalizacao[p.id]}
             onMetaSinalizacao={(patch) =>
               setMetaSinalizacao((m) => ({
@@ -2873,79 +3173,30 @@ function ChecklistView({ userPerfil, uid }) {
         >
           Sair
         </button>
-        <button
-          type="button"
-          onClick={async () => {
-            if (!avaliacaoId) {
-              setSyncError("Sessão de avaliação inválida. Volte e inicie novamente.");
-              return;
-            }
-            setSyncError(null);
-            setNavegarLoading(true);
-            try {
-              await persistirRespostasDaSecao(avaliacaoId, secao, respostas);
-              if (secaoAtual < secoesLista.length - 1) {
-                setSecaoAtual((s) => s + 1);
-              } else {
-                const errosPend = validarPendenciasAntesConcluir({
-                  secoesLista,
-                  idPerguntaParaGravar,
-                  pendenciasMap,
-                  metaSinalizacao,
-                });
-                if (errosPend.length > 0) {
-                  throw new Error(
-                    `Pendências sem resposta: ${errosPend.slice(0, 4).join("; ")}${
-                      errosPend.length > 4 ? "…" : ""
-                    }`
-                  );
-                }
-                const itemsSinalizacao = montarItemsSinalizacaoConcluir({
-                  secoesLista,
-                  respostas,
-                  idPerguntaParaGravar,
-                  pendenciasMap,
-                  metaSinalizacao,
-                });
-                const resFim = await fetch("/api/checklist/concluir", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    avaliacao_id: avaliacaoId,
-                    items: itemsSinalizacao,
-                  }),
-                });
-                const jsonFim = await resFim.json().catch(() => ({}));
-                if (!resFim.ok) throw new Error(jsonFim.error || "Não foi possível concluir a avaliação.");
-                clearChecklistDraft({
-                  uid,
-                  tipoAvaliador: tipoAvaliadorAtual,
-                  turno: turnoEscolhido,
-                });
-                setMetaSinalizacao({});
-                setPendenciasMap({});
-                setNotaConclusaoBd({
-                  nota_total: jsonFim.nota_total,
-                  nota_maxima: jsonFim.nota_maxima,
-                  percentual: jsonFim.percentual,
-                });
-                setStep("concluido");
-              }
-            } catch (err) {
-              console.error(err);
-              setSyncError(err.message ?? "Não foi possível guardar as respostas.");
-            } finally {
-              setNavegarLoading(false);
-            }
-          }}
-          disabled={!podeProsseguir || navegarLoading}
-          style={{ flex: "2 1 140px", minWidth: 120, padding: "12px", borderRadius: 10, border: "none", background: podeProsseguir && !navegarLoading ? "var(--accent)" : "var(--border)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: podeProsseguir && !navegarLoading ? "pointer" : "not-allowed" }}>
-          {navegarLoading
-            ? "A guardar…"
-            : secaoAtual < secoesLista.length - 1
-              ? "Próxima seção →"
-              : "Concluir avaliação"}
-        </button>
+        {!ehUltimaSecao && (
+          <button
+            type="button"
+            onClick={irParaProximaSecao}
+            disabled={!podeProsseguir || navegarLoading || pendenciasCarregando}
+            style={{ flex: "2 1 140px", minWidth: 120, padding: "12px", borderRadius: 10, border: "none", background: podeProsseguir && !navegarLoading && !pendenciasCarregando ? "var(--accent)" : "var(--border)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: podeProsseguir && !navegarLoading && !pendenciasCarregando ? "pointer" : "not-allowed" }}
+          >
+            {navegarLoading ? "A guardar…" : "Próxima seção →"}
+          </button>
+        )}
+        {mostrarBotaoConcluir && (
+          <button
+            type="button"
+            onClick={executarConclusao}
+            disabled={!podeClicarConcluir}
+            style={{ flex: "2 1 140px", minWidth: 120, padding: "12px", borderRadius: 10, border: "none", background: podeClicarConcluir ? "var(--accent)" : "var(--border)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: podeClicarConcluir ? "pointer" : "not-allowed" }}
+          >
+            {navegarLoading
+              ? "A guardar…"
+              : bypassValidacao
+                ? "Concluir (modo teste)"
+                : "Concluir avaliação"}
+          </button>
+        )}
       </div>
 
       {modalSairOpen && (
