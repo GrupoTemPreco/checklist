@@ -437,6 +437,9 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState("");
   const [secoesAbertas, setSecoesAbertas] = useState(() => new Set());
+  const [secAtivoLoadingId, setSecAtivoLoadingId] = useState(null);
+
+  const podeGerirSecaoAtiva = userPerfil === "admin";
 
   const turnoFetch = useMemo(
     () => turnoModeloPorTipoAvaliador(tipoAvaliador),
@@ -451,6 +454,50 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
       else next.add(id);
       return next;
     });
+  };
+
+  const alterarAtivoSecao = async (sec, proximoAtivo) => {
+    if (!podeGerirSecaoAtiva || secAtivoLoadingId) return;
+    const lista = sec.perguntas ?? [];
+    const qtdAtivas = lista.filter(
+      (p) => !(p.ativo === false || p.ativo === "false")
+    ).length;
+
+    if (!proximoAtivo) {
+      const ok = window.confirm(
+        `A secção «${sec.titulo}» tem ${qtdAtivas} pergunta(s) ativa(s).\n\n` +
+          `Ao inativar, a secção deixa de aparecer em novas avaliações e no detalhe por secção das avaliações já concluídas.\n\n` +
+          `As perguntas mantêm o estado individual (ativas/inativas) — reativar a secção restaura a lista como estava.\n\n` +
+          `Continuar?`
+      );
+      if (!ok) return;
+    }
+
+    setSecAtivoLoadingId(sec.id);
+    setError(null);
+    try {
+      const res = await fetch("/api/checklist/secoes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          perfil: "admin",
+          id: sec.id,
+          ativo: proximoAtivo,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Falha ao actualizar a secção.");
+      await carregar();
+      setMsg(
+        proximoAtivo
+          ? `Secção «${sec.titulo}» activada.`
+          : `Secção «${sec.titulo}» inactivada.`
+      );
+    } catch (e) {
+      setError(e.message ?? "Erro ao actualizar secção.");
+    } finally {
+      setSecAtivoLoadingId(null);
+    }
   };
 
   const carregar = useCallback(async () => {
@@ -806,6 +853,7 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
             secoes.map((sec) => {
               const sid = String(sec.id);
               const aberta = secoesAbertas.has(sid);
+              const secaoInativa = sec.ativo === false || sec.ativo === "false";
               const lista = sec.perguntas ?? [];
               const ativas = lista.filter(
                 (p) => !(p.ativo === false || p.ativo === "false")
@@ -815,6 +863,7 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
                 (acc, p) => acc + (Number(p.pontos_max) || 0),
                 0
               );
+              const toggling = secAtivoLoadingId === sec.id;
               return (
                 <div
                   key={sec.id}
@@ -824,59 +873,119 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
                     borderRadius: 10,
                     overflow: "hidden",
                     background: "var(--card-bg)",
+                    opacity: secaoInativa ? 0.55 : 1,
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => toggleSecao(sec.id)}
+                  <div
                     style={{
                       display: "flex",
                       width: "100%",
                       alignItems: "center",
                       gap: 8,
                       padding: "12px 14px",
-                      border: "none",
                       background: aberta ? "var(--accent-soft)" : "transparent",
-                      cursor: "pointer",
-                      textAlign: "left",
                     }}
                   >
-                    <span
+                    <button
+                      type="button"
+                      onClick={() => toggleSecao(sec.id)}
                       style={{
-                        fontSize: 12,
-                        width: 16,
-                        color: "var(--text-secondary)",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {aberta ? "▼" : "▶"}
-                    </span>
-                    <span
-                      style={{
+                        display: "flex",
                         flex: 1,
-                        fontSize: 14,
-                        fontWeight: 700,
-                        color: "var(--accent)",
-                      }}
-                    >
-                      {sec.titulo}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 12,
-                        color: "var(--text-secondary)",
-                        flexShrink: 1,
                         minWidth: 0,
-                        textAlign: "right",
-                        lineHeight: 1.35,
+                        alignItems: "center",
+                        gap: 8,
+                        padding: 0,
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        textAlign: "left",
                       }}
                     >
-                      {qtd} {qtd === 1 ? "pergunta" : "perguntas"}
-                      <span style={{ marginLeft: 6, opacity: 0.92 }}>
-                        · Pontuação máxima: {pontosMaxSecao}
+                      <span
+                        style={{
+                          fontSize: 12,
+                          width: 16,
+                          color: "var(--text-secondary)",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {aberta ? "▼" : "▶"}
                       </span>
-                    </span>
-                  </button>
+                      <span
+                        style={{
+                          flex: 1,
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: "var(--accent)",
+                          minWidth: 0,
+                        }}
+                      >
+                        {sec.titulo}
+                        {secaoInativa && (
+                          <span
+                            style={{
+                              marginLeft: 8,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              color: "#6b7280",
+                              background: "#f3f4f6",
+                              border: "1px solid #e5e7eb",
+                              borderRadius: 6,
+                              padding: "2px 7px",
+                              verticalAlign: "middle",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Inativa
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "var(--text-secondary)",
+                          flexShrink: 1,
+                          minWidth: 0,
+                          textAlign: "right",
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        {qtd} {qtd === 1 ? "pergunta" : "perguntas"}
+                        <span style={{ marginLeft: 6, opacity: 0.92 }}>
+                          · Pontuação máxima: {pontosMaxSecao}
+                        </span>
+                      </span>
+                    </button>
+                    {podeGerirSecaoAtiva && (
+                      <label
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: "var(--text-secondary)",
+                          flexShrink: 0,
+                          cursor: toggling ? "wait" : "pointer",
+                          whiteSpace: "nowrap",
+                          opacity: toggling ? 0.6 : 1,
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={toggling || modo === "add"}
+                          checked={!secaoInativa}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            alterarAtivoSecao(sec, e.target.checked);
+                          }}
+                        />
+                        Ativa
+                      </label>
+                    )}
+                  </div>
                   {aberta && (
                     <div style={{ padding: "0 12px 12px" }}>
                       {modo === "view" &&

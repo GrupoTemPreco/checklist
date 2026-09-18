@@ -18,6 +18,7 @@ import {
 } from "@/lib/checklist-draft";
 import { fetchSecoes, uploadFoto } from "@/lib/supabase";
 import AdminPerguntasModal from "./AdminPerguntasModal";
+import SimularPontuacaoModal from "./SimularPontuacaoModal";
 import {
   indexarPendencias,
   fetchPendenciasLoja,
@@ -1061,6 +1062,7 @@ function ChecklistView({ userPerfil, uid }) {
   const [pendenciasCarregando, setPendenciasCarregando] = useState(false);
   const [errosPendenciasLista, setErrosPendenciasLista] = useState([]);
   const [scrollParaPerguntaId, setScrollParaPerguntaId] = useState(null);
+  const [modalSimularPontuacao, setModalSimularPontuacao] = useState(false);
 
   const atuaComoSupervisor =
     userPerfil === "supervisor" ||
@@ -1978,7 +1980,10 @@ function ChecklistView({ userPerfil, uid }) {
               <button
                 type="button"
                 aria-label="Voltar para a lista"
-                onClick={() => setHistoricoDetalhe(null)}
+                onClick={() => {
+                  setHistoricoDetalhe(null);
+                  setModalSimularPontuacao(false);
+                }}
                 style={{ ...historicoBackPill, flexShrink: 0 }}
               >
                 <span style={{ fontSize: 26, lineHeight: 1, fontWeight: 400 }} aria-hidden>
@@ -2079,8 +2084,10 @@ function ChecklistView({ userPerfil, uid }) {
               </div>
             </div>
 
-            {podeGestionarHistoricoLista && (
-              <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            {(podeGestionarHistoricoLista || userPerfil === "admin") && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                {podeGestionarHistoricoLista && (
+                  <>
                 <button
                   type="button"
                   onClick={() => {
@@ -2120,6 +2127,26 @@ function ChecklistView({ userPerfil, uid }) {
                 >
                   Eliminar avaliação
                 </button>
+                  </>
+                )}
+                {userPerfil === "admin" && (
+                  <button
+                    type="button"
+                    onClick={() => setModalSimularPontuacao(true)}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 10,
+                      border: "1px solid #bfdbfe",
+                      background: "#eff6ff",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      color: "#1d4ed8",
+                    }}
+                  >
+                    Simular nova pontuação
+                  </button>
+                )}
               </div>
             )}
 
@@ -2129,6 +2156,21 @@ function ChecklistView({ userPerfil, uid }) {
               avaliacaoKey={historicoDetalhe.id}
               pendenciasMap={pendenciasDetalheMap}
             />
+
+            {userPerfil === "admin" && (
+              <SimularPontuacaoModal
+                open={modalSimularPontuacao}
+                onClose={() => setModalSimularPontuacao(false)}
+                avaliacaoId={historicoDetalhe.id}
+                perfil={userPerfil}
+                notaOriginal={{
+                  percentual: historicoDetalhe.percentual,
+                  nota_total: historicoDetalhe.nota_total,
+                  nota_maxima: historicoDetalhe.nota_maxima,
+                }}
+                porSecaoOriginal={porSecaoHistorico}
+              />
+            )}
           </>
         )}
 
