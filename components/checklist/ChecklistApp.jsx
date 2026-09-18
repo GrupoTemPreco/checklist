@@ -1010,7 +1010,7 @@ async function persistirRespostasDaSecao(avaliacao_id, sec, respostas) {
 }
 
 // ─── VIEW: CHECKLIST (formulário) ───────────────────────────────────────────
-function ChecklistView({ userPerfil, uid }) {
+function ChecklistView({ userPerfil, uid, modalSimularPontuacao, setModalSimularPontuacao }) {
   const [step, setStep] = useState("identificacao"); // identificacao | historico | secao | concluido
   const [secaoAtual, setSecaoAtual] = useState(0);
   const [avaliador, setAvaliador] = useState("");
@@ -1062,7 +1062,6 @@ function ChecklistView({ userPerfil, uid }) {
   const [pendenciasCarregando, setPendenciasCarregando] = useState(false);
   const [errosPendenciasLista, setErrosPendenciasLista] = useState([]);
   const [scrollParaPerguntaId, setScrollParaPerguntaId] = useState(null);
-  const [modalSimularPontuacao, setModalSimularPontuacao] = useState(false);
 
   const atuaComoSupervisor =
     userPerfil === "supervisor" ||
@@ -1810,6 +1809,27 @@ function ChecklistView({ userPerfil, uid }) {
               </button>
             </>
           ) : null}
+          {userPerfil === "admin" && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setModalSimularPontuacao(av);
+              }}
+              style={{
+                padding: "6px 10px",
+                fontSize: 12,
+                fontWeight: 600,
+                borderRadius: 8,
+                border: "1px solid var(--border)",
+                background: "var(--card-bg)",
+                color: "var(--text-primary)",
+                cursor: "pointer",
+              }}
+            >
+              Simular
+            </button>
+          )}
         </div>
       </div>
     );
@@ -1982,7 +2002,7 @@ function ChecklistView({ userPerfil, uid }) {
                 aria-label="Voltar para a lista"
                 onClick={() => {
                   setHistoricoDetalhe(null);
-                  setModalSimularPontuacao(false);
+                  setModalSimularPontuacao(null);
                 }}
                 style={{ ...historicoBackPill, flexShrink: 0 }}
               >
@@ -1995,6 +2015,7 @@ function ChecklistView({ userPerfil, uid }) {
                 type="button"
                 onClick={() => {
                   setHistoricoDetalhe(null);
+                  setModalSimularPontuacao(null);
                   setStep("identificacao");
                 }}
                 style={{
@@ -2084,10 +2105,8 @@ function ChecklistView({ userPerfil, uid }) {
               </div>
             </div>
 
-            {(podeGestionarHistoricoLista || userPerfil === "admin") && (
+            {podeGestionarHistoricoLista && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-                {podeGestionarHistoricoLista && (
-                  <>
                 <button
                   type="button"
                   onClick={() => {
@@ -2127,26 +2146,6 @@ function ChecklistView({ userPerfil, uid }) {
                 >
                   Eliminar avaliação
                 </button>
-                  </>
-                )}
-                {userPerfil === "admin" && (
-                  <button
-                    type="button"
-                    onClick={() => setModalSimularPontuacao(true)}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 10,
-                      border: "1px solid #bfdbfe",
-                      background: "#eff6ff",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      color: "#1d4ed8",
-                    }}
-                  >
-                    Simular nova pontuação
-                  </button>
-                )}
               </div>
             )}
 
@@ -2156,21 +2155,6 @@ function ChecklistView({ userPerfil, uid }) {
               avaliacaoKey={historicoDetalhe.id}
               pendenciasMap={pendenciasDetalheMap}
             />
-
-            {userPerfil === "admin" && (
-              <SimularPontuacaoModal
-                open={modalSimularPontuacao}
-                onClose={() => setModalSimularPontuacao(false)}
-                avaliacaoId={historicoDetalhe.id}
-                perfil={userPerfil}
-                notaOriginal={{
-                  percentual: historicoDetalhe.percentual,
-                  nota_total: historicoDetalhe.nota_total,
-                  nota_maxima: historicoDetalhe.nota_maxima,
-                }}
-                porSecaoOriginal={porSecaoHistorico}
-              />
-            )}
           </>
         )}
 
@@ -3354,7 +3338,12 @@ function sortAvaliacoesDesc(list) {
 }
 
 // ─── VIEW: DASHBOARD ─────────────────────────────────────────────────────────
-function DashboardView({ userPerfil = "gerente", uid }) {
+function DashboardView({
+  userPerfil = "gerente",
+  uid,
+  modalSimularPontuacao,
+  setModalSimularPontuacao,
+}) {
   const [perguntasModalOpen, setPerguntasModalOpen] = useState(false);
   const [tipoDashboard, setTipoDashboard] = useState(
     userPerfil === "supervisor" ? "supervisor" : "gerente"
@@ -3701,6 +3690,27 @@ function DashboardView({ userPerfil = "gerente", uid }) {
               </button>
             </>
           ) : null}
+          {userPerfil === "admin" && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setModalSimularPontuacao(av);
+              }}
+              style={{
+                padding: "6px 10px",
+                fontSize: 12,
+                fontWeight: 600,
+                borderRadius: 8,
+                border: "1px solid var(--border)",
+                background: "var(--card-bg)",
+                color: "var(--text-primary)",
+                cursor: "pointer",
+              }}
+            >
+              Simular
+            </button>
+          )}
         </div>
       </div>
     );
@@ -4284,7 +4294,38 @@ function DashboardView({ userPerfil = "gerente", uid }) {
 // ─── APP PRINCIPAL ───────────────────────────────────────────────────────────
 export default function ChecklistApp({ userPerfil = "supervisor", uid }) {
   const [aba, setAba] = useState("checklist");
+  const [modalSimularPontuacao, setModalSimularPontuacao] = useState(null);
+  const [modalSimularSecoes, setModalSimularSecoes] = useState([]);
   const podeVerAnalise = userPerfil === "supervisor" || userPerfil === "admin";
+
+  useEffect(() => {
+    setModalSimularPontuacao(null);
+  }, [aba]);
+
+  useEffect(() => {
+    if (!modalSimularPontuacao?.id) {
+      setModalSimularSecoes([]);
+      return;
+    }
+    let cancel = false;
+    (async () => {
+      try {
+        const tipo =
+          modalSimularPontuacao.tipo_avaliador === "supervisor"
+            ? "supervisor"
+            : "gerente";
+        const qs = new URLSearchParams({ tipo_avaliador: tipo });
+        const res = await fetch(`/api/checklist/avaliacoes?${qs}`, { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
+        if (!cancel) setModalSimularSecoes(res.ok ? json.secoes ?? [] : []);
+      } catch {
+        if (!cancel) setModalSimularSecoes([]);
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [modalSimularPontuacao?.id, modalSimularPontuacao?.tipo_avaliador]);
 
   return (
     <div style={{
@@ -4319,9 +4360,49 @@ export default function ChecklistApp({ userPerfil = "supervisor", uid }) {
       </div>
 
       {aba === "checklist" ? (
-        <ChecklistView userPerfil={userPerfil} uid={uid} />
+        <ChecklistView
+          userPerfil={userPerfil}
+          uid={uid}
+          modalSimularPontuacao={modalSimularPontuacao}
+          setModalSimularPontuacao={setModalSimularPontuacao}
+        />
       ) : (
-        <DashboardView userPerfil={userPerfil} uid={uid} />
+        <DashboardView
+          userPerfil={userPerfil}
+          uid={uid}
+          modalSimularPontuacao={modalSimularPontuacao}
+          setModalSimularPontuacao={setModalSimularPontuacao}
+        />
+      )}
+
+      {userPerfil === "admin" && (
+        <SimularPontuacaoModal
+          open={!!modalSimularPontuacao}
+          onClose={() => setModalSimularPontuacao(null)}
+          avaliacaoId={modalSimularPontuacao?.id}
+          perfil={userPerfil}
+          notaOriginal={
+            modalSimularPontuacao
+              ? {
+                  percentual: modalSimularPontuacao.percentual,
+                  nota_total: modalSimularPontuacao.nota_total,
+                  nota_maxima: modalSimularPontuacao.nota_maxima,
+                }
+              : null
+          }
+          porSecaoOriginal={
+            modalSimularPontuacao
+              ? montarPorSecao(
+                  secoesComRespostasParaMontar(
+                    modalSimularSecoes,
+                    modalSimularPontuacao.respostas,
+                    turnoModeloPorTipoAvaliador(modalSimularPontuacao.tipo_avaliador)
+                  ),
+                  modalSimularPontuacao.respostas
+                )
+              : []
+          }
+        />
       )}
     </div>
   );

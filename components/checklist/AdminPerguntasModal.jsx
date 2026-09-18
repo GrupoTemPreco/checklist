@@ -439,7 +439,7 @@ export default function AdminPerguntasModal({ open, onClose, userPerfil = "admin
   const [secoesAbertas, setSecoesAbertas] = useState(() => new Set());
   const [secAtivoLoadingId, setSecAtivoLoadingId] = useState(null);
 
-  const podeGerirSecaoAtiva = userPerfil === "admin";
+  const podeGerirSecaoAtiva = userPerfil === "admin" && modo === "edit";
 
   const turnoFetch = useMemo(
     () => turnoModeloPorTipoAvaliador(tipoAvaliador),

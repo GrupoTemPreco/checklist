@@ -9,10 +9,7 @@ export const dynamic = "force-dynamic";
  * Somente leitura: chama RPCs de simulação. Não grava nada.
  * O perfil vem da URL (shell) e é falsificável — não é barreira de segurança real.
  */
-export async function GET(
-  request: Request,
-  { params }: { params: { id?: string } }
-) {
+export async function GET(request, { params }) {
   try {
     const id = params?.id;
     if (!id || typeof id !== "string") {
@@ -57,7 +54,7 @@ export async function GET(
         ? detalheRes.data
         : detalheRes.data ?? [],
     });
-  } catch (e: unknown) {
+  } catch (e) {
     console.error(e);
     const message =
       e instanceof Error ? e.message : "Erro ao simular pontuação.";
